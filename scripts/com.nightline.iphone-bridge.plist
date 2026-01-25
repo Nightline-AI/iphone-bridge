@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Unique identifier for this service -->
+    <key>Label</key>
+    <string>com.nightline.iphone-bridge</string>
+    
+    <!-- Command to run -->
+    <key>ProgramArguments</key>
+    <array>
+        <!-- Update this path to your Python installation -->
+        <string>/usr/local/bin/python3</string>
+        <string>-m</string>
+        <string>uvicorn</string>
+        <string>app.main:app</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
+        <string>--port</string>
+        <string>8080</string>
+    </array>
+    
+    <!-- Working directory (update to your installation path) -->
+    <key>WorkingDirectory</key>
+    <string>/Users/nightline/iphone-bridge</string>
+    
+    <!-- Environment variables -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+        <!-- Add your environment variables here or use .env file -->
+    </dict>
+    
+    <!-- Start automatically on boot -->
+    <key>RunAtLoad</key>
+    <true/>
+    
+    <!-- Keep the service running (restart if it crashes) -->
+    <key>KeepAlive</key>
+    <dict>
+        <!-- Only restart on crash, not on successful exit -->
+        <key>SuccessfulExit</key>
+        <false/>
+        <!-- Restart if the process crashes -->
+        <key>Crashed</key>
+        <true/>
+    </dict>
+    
+    <!-- Throttle restarts (wait 10 seconds between restarts) -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    
+    <!-- Log output -->
+    <key>StandardOutPath</key>
+    <string>/var/log/iphone-bridge/stdout.log</string>
+    
+    <key>StandardErrorPath</key>
+    <string>/var/log/iphone-bridge/stderr.log</string>
+    
+    <!-- Process priority (0 = normal) -->
+    <key>Nice</key>
+    <integer>0</integer>
+</dict>
+</plist>
