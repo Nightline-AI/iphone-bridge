@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     # Nightline server to forward messages to
     nightline_server_url: str = "http://localhost:8000"
 
+    # Client ID - identifies which Nightline client this bridge belongs to
+    # This is included in the webhook URL path
+    nightline_client_id: str = ""
+
     # Shared secret for webhook authentication
     webhook_secret: str = "change-me-in-production"
 
@@ -24,6 +28,9 @@ class Settings(BaseSettings):
 
     # Whether to process messages from before startup
     process_historical: bool = False
+
+    # Mock mode - don't connect to chat.db (for development/testing)
+    mock_mode: bool = False
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Mac Mini bridge for iPhone iMessage/SMS and call forwarding to Nightline"
 authors = ["Nightline <dev@nightline.ai>"]
 readme = "README.md"
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.11"

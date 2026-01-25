@@ -216,6 +216,10 @@ class iMessageWatcher:
             except FileNotFoundError:
                 logger.warning("Database not found, will retry in poll loop")
                 self.last_rowid = 0
+            except Exception as e:
+                logger.warning(f"Could not connect to chat.db: {e}")
+                logger.warning("Watcher will retry in poll loop. Grant Full Disk Access to fix.")
+                self.last_rowid = 0
 
         self._task = asyncio.create_task(self._poll_loop())
 

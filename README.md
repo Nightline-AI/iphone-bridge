@@ -118,6 +118,7 @@ curl http://localhost:8080/health
 ```
 
 Response:
+
 ```json
 {
   "status": "healthy",
@@ -140,6 +141,7 @@ curl -X POST http://localhost:8080/send \
 ```
 
 Response:
+
 ```json
 {
   "success": true,
@@ -189,15 +191,15 @@ Content-Type: application/json
 
 ## Configuration Options
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NIGHTLINE_SERVER_URL` | `http://localhost:8000` | URL of the Nightline server |
-| `WEBHOOK_SECRET` | (required) | Shared secret for authentication |
-| `POLL_INTERVAL` | `2.0` | Seconds between chat.db polls |
-| `HOST` | `0.0.0.0` | Server bind address |
-| `PORT` | `8080` | Server port |
-| `LOG_LEVEL` | `INFO` | Logging level |
-| `PROCESS_HISTORICAL` | `false` | Process messages from before startup |
+| Variable               | Default                 | Description                          |
+| ---------------------- | ----------------------- | ------------------------------------ |
+| `NIGHTLINE_SERVER_URL` | `http://localhost:8000` | URL of the Nightline server          |
+| `WEBHOOK_SECRET`       | (required)              | Shared secret for authentication     |
+| `POLL_INTERVAL`        | `2.0`                   | Seconds between chat.db polls        |
+| `HOST`                 | `0.0.0.0`               | Server bind address                  |
+| `PORT`                 | `8080`                  | Server port                          |
+| `LOG_LEVEL`            | `INFO`                  | Logging level                        |
+| `PROCESS_HISTORICAL`   | `false`                 | Process messages from before startup |
 
 ## Troubleshooting
 
@@ -223,11 +225,13 @@ Content-Type: application/json
 ### Service not starting
 
 Check the logs:
+
 ```bash
 tail -f /var/log/iphone-bridge/stderr.log
 ```
 
 Common issues:
+
 - Python path incorrect in launchd plist
 - Missing Full Disk Access permission
 - Port 8080 already in use
@@ -242,6 +246,7 @@ The Nightline server needs to reach this bridge. Options:
 4. **Static IP**: If Mac Mini has a public IP
 
 Example Cloudflare Tunnel setup:
+
 ```bash
 # Install cloudflared
 brew install cloudflared
