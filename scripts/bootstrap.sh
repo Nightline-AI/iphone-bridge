@@ -420,8 +420,15 @@ echo "   2. Go to Privacy & Security → Full Disk Access"
 echo "   3. Add Terminal (or your terminal app)"
 echo "   4. Add: $PYTHON_BIN"
 echo ""
+echo -e "${CYAN}Dashboard:${NC} http://localhost:8080/dashboard"
+echo ""
 echo -e "${CYAN}Logs:${NC}"
 echo "   Bridge:  tail -f $LOG_DIR/bridge.log"
 echo "   Tunnel:  tail -f $LOG_DIR/tunnel.log"
 echo "   Updates: tail -f $LOG_DIR/updater.log"
 echo ""
+
+# Open dashboard in browser
+echo -e "${YELLOW}Opening dashboard in browser...${NC}"
+sleep 3
+open "http://localhost:8080/dashboard" 2>/dev/null || echo "Open http://localhost:8080/dashboard in your browser"
