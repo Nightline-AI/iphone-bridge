@@ -160,6 +160,11 @@ fi
 # ===== Install Dependencies =====
 
 echo -e "${YELLOW}Installing dependencies...${NC}"
+
+# Fix for Homebrew Python venv issue on macOS
+export PYTHON_VENV_USE_SYMLINKS=1
+poetry config virtualenvs.options.always-copy true 2>/dev/null || true
+
 poetry install --no-interaction
 POETRY_PYTHON=$(poetry env info --path)/bin/python
 echo -e "${GREEN}✓${NC} Dependencies installed"
