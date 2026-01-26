@@ -1,6 +1,6 @@
 #!/bin/bash
 # iPhone Bridge Installer
-# One command to set up everything including Cloudflare Tunnel
+# One command to set up everything including Cloudflare Tunnels
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/Nightline-AI/iphone-bridge/main/scripts/bootstrap.sh | bash -s -- \
@@ -28,6 +28,7 @@ TUNNEL_DOMAIN="nightline.app"
 CLIENT_ID=""
 CLOUDFLARE_TOKEN=""
 WEBHOOK_SECRET=""
+MANAGEMENT_TOKEN=""
 SERVER_URL="$NIGHTLINE_API"
 
 while [[ $# -gt 0 ]]; do
@@ -42,6 +43,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --secret)
             WEBHOOK_SECRET="$2"
+            shift 2
+            ;;
+        --management-token)
+            MANAGEMENT_TOKEN="$2"
             shift 2
             ;;
         --server-url)
@@ -62,9 +67,12 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Optional:"
             echo "  --secret SECRET          Webhook secret (auto-generated if not provided)"
+            echo "  --management-token TOKEN Management UI token (auto-generated if not provided)"
             echo "  --server-url URL         Nightline server URL (default: $NIGHTLINE_API)"
             echo ""
-            echo "Result: https://bridge-CLIENT_ID.$TUNNEL_DOMAIN"
+            echo "Result:"
+            echo "  Bridge:     https://bridge-CLIENT_ID.$TUNNEL_DOMAIN"
+            echo "  Management: https://manage-CLIENT_ID.$TUNNEL_DOMAIN"
             exit 0
             ;;
         *)
@@ -91,14 +99,16 @@ if [[ -z "$CLOUDFLARE_TOKEN" ]]; then
     exit 1
 fi
 
-TUNNEL_HOSTNAME="bridge-${CLIENT_ID}.${TUNNEL_DOMAIN}"
+BRIDGE_HOSTNAME="bridge-${CLIENT_ID}.${TUNNEL_DOMAIN}"
+MANAGE_HOSTNAME="manage-${CLIENT_ID}.${TUNNEL_DOMAIN}"
 
 echo -e "${CYAN}"
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║                                                              ║"
 echo "║     📱  iPhone Bridge Installer                              ║"
 echo "║                                                              ║"
-echo "║     Setting up: $TUNNEL_HOSTNAME"
+echo "║     Bridge:     $BRIDGE_HOSTNAME"
+echo "║     Management: $MANAGE_HOSTNAME"
 echo "║                                                              ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
@@ -123,11 +133,11 @@ if ! command -v brew &> /dev/null; then
 fi
 echo -e "${GREEN}✓${NC} Homebrew installed"
 
-# Install Python 3.12 via Homebrew (need 3.10+ for type hints)
+# Install Python 3.12 via Homebrew
 echo -e "${YELLOW}Installing Python 3.12...${NC}"
 brew install python@3.12 2>/dev/null || true
 
-# Use Homebrew Python explicitly (not system Python 3.9)
+# Use Homebrew Python explicitly
 if [[ -f "/opt/homebrew/bin/python3.12" ]]; then
     PYTHON_CMD="/opt/homebrew/bin/python3.12"
 elif [[ -f "/usr/local/bin/python3.12" ]]; then
@@ -195,20 +205,32 @@ if [[ -z "$WEBHOOK_SECRET" ]]; then
     WEBHOOK_SECRET=$(openssl rand -hex 32)
 fi
 
+if [[ -z "$MANAGEMENT_TOKEN" ]]; then
+    MANAGEMENT_TOKEN=$(openssl rand -hex 32)
+fi
+
 cat > "$INSTALL_DIR/.env" << EOF
 # iPhone Bridge Configuration
 # Generated on $(date)
-# Bridge URL: https://$TUNNEL_HOSTNAME
+#
+# Bridge URL:     https://$BRIDGE_HOSTNAME
+# Management URL: https://$MANAGE_HOSTNAME
 
+# Nightline Server
 NIGHTLINE_SERVER_URL=$SERVER_URL
 NIGHTLINE_CLIENT_ID=$CLIENT_ID
 WEBHOOK_SECRET=$WEBHOOK_SECRET
+
+# Bridge Settings
 POLL_INTERVAL=2.0
 HOST=0.0.0.0
 PORT=8080
 LOG_LEVEL=INFO
 PROCESS_HISTORICAL=false
 MOCK_MODE=false
+
+# Management Agent
+MANAGEMENT_TOKEN=$MANAGEMENT_TOKEN
 EOF
 
 echo -e "${GREEN}✓${NC} Configuration created"
@@ -261,7 +283,54 @@ EOF
 launchctl unload "$LAUNCH_AGENTS_DIR/$BRIDGE_PLIST" 2>/dev/null || true
 launchctl load "$LAUNCH_AGENTS_DIR/$BRIDGE_PLIST"
 
-echo -e "${GREEN}✓${NC} Bridge service installed"
+echo -e "${GREEN}✓${NC} Bridge service installed (port 8080)"
+
+# ===== Install Management Agent Service =====
+
+echo -e "${YELLOW}Installing management agent...${NC}"
+
+MANAGEMENT_PLIST="com.nightline.management-agent.plist"
+cat > "$LAUNCH_AGENTS_DIR/$MANAGEMENT_PLIST" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nightline.management-agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$PYTHON_BIN</string>
+        <string>-m</string>
+        <string>uvicorn</string>
+        <string>management.main:app</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
+        <string>--port</string>
+        <string>8081</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>$INSTALL_DIR</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>$LOG_DIR/management.log</string>
+    <key>StandardErrorPath</key>
+    <string>$LOG_DIR/management.log</string>
+</dict>
+</plist>
+EOF
+
+launchctl unload "$LAUNCH_AGENTS_DIR/$MANAGEMENT_PLIST" 2>/dev/null || true
+launchctl load "$LAUNCH_AGENTS_DIR/$MANAGEMENT_PLIST"
+
+echo -e "${GREEN}✓${NC} Management agent installed (port 8081)"
 
 # ===== Install Auto-Updater =====
 
@@ -297,16 +366,15 @@ launchctl load "$LAUNCH_AGENTS_DIR/$UPDATER_PLIST"
 
 echo -e "${GREEN}✓${NC} Auto-updater installed (checks every 5 min)"
 
-# ===== Setup Cloudflare Tunnel =====
+# ===== Setup Cloudflare Tunnels =====
 
 echo ""
-echo -e "${YELLOW}Setting up Cloudflare Tunnel...${NC}"
+echo -e "${YELLOW}Setting up Cloudflare Tunnels...${NC}"
 
-TUNNEL_NAME="iphone-bridge-${CLIENT_ID}"
 CF_DIR="$HOME/.cloudflared"
 mkdir -p "$CF_DIR"
 
-# Check if already logged in (cert.pem exists)
+# Check if already logged in
 if [[ ! -f "$CF_DIR/cert.pem" ]]; then
     echo ""
     echo -e "${CYAN}Cloudflare login required (one-time setup)${NC}"
@@ -324,57 +392,85 @@ if [[ ! -f "$CF_DIR/cert.pem" ]]; then
     echo -e "${GREEN}✓${NC} Cloudflare authenticated"
 fi
 
-# Check if tunnel already exists
-EXISTING_TUNNEL=$(cloudflared tunnel list 2>/dev/null | grep "$TUNNEL_NAME" | awk '{print $1}' || echo "")
+# --- Bridge Tunnel ---
+BRIDGE_TUNNEL_NAME="iphone-bridge-${CLIENT_ID}"
+EXISTING_BRIDGE_TUNNEL=$(cloudflared tunnel list 2>/dev/null | grep "$BRIDGE_TUNNEL_NAME" | awk '{print $1}' || echo "")
 
-if [[ -n "$EXISTING_TUNNEL" ]]; then
-    echo -e "${DIM}Tunnel exists, using: $EXISTING_TUNNEL${NC}"
-    TUNNEL_ID="$EXISTING_TUNNEL"
+if [[ -n "$EXISTING_BRIDGE_TUNNEL" ]]; then
+    echo -e "${DIM}Bridge tunnel exists: $EXISTING_BRIDGE_TUNNEL${NC}"
+    BRIDGE_TUNNEL_ID="$EXISTING_BRIDGE_TUNNEL"
 else
-    echo -e "${DIM}Creating tunnel...${NC}"
-    cloudflared tunnel create "$TUNNEL_NAME" 2>&1 | tee /tmp/cf-tunnel-create.log
-    TUNNEL_ID=$(cloudflared tunnel list 2>/dev/null | grep "$TUNNEL_NAME" | awk '{print $1}')
+    echo -e "${DIM}Creating bridge tunnel...${NC}"
+    cloudflared tunnel create "$BRIDGE_TUNNEL_NAME" 2>&1 | tee /tmp/cf-bridge-tunnel.log
+    BRIDGE_TUNNEL_ID=$(cloudflared tunnel list 2>/dev/null | grep "$BRIDGE_TUNNEL_NAME" | awk '{print $1}')
 fi
 
-if [[ -z "$TUNNEL_ID" ]]; then
-    echo -e "${RED}Failed to create tunnel. Please run 'cloudflared tunnel login' manually.${NC}"
+if [[ -z "$BRIDGE_TUNNEL_ID" ]]; then
+    echo -e "${RED}Failed to create bridge tunnel${NC}"
     exit 1
 fi
 
-echo -e "${GREEN}✓${NC} Tunnel created: $TUNNEL_ID"
-
-# Create tunnel config
-cat > "$CF_DIR/config-${CLIENT_ID}.yml" << EOF
-tunnel: $TUNNEL_ID
-credentials-file: $CF_DIR/$TUNNEL_ID.json
+cat > "$CF_DIR/config-bridge-${CLIENT_ID}.yml" << EOF
+tunnel: $BRIDGE_TUNNEL_ID
+credentials-file: $CF_DIR/$BRIDGE_TUNNEL_ID.json
 
 ingress:
-  - hostname: $TUNNEL_HOSTNAME
+  - hostname: $BRIDGE_HOSTNAME
     service: http://localhost:8080
   - service: http_status:404
 EOF
 
-# Route DNS
-echo -e "${DIM}Configuring DNS...${NC}"
-cloudflared tunnel route dns "$TUNNEL_NAME" "$TUNNEL_HOSTNAME" 2>/dev/null || echo -e "${DIM}DNS route may already exist${NC}"
+cloudflared tunnel route dns "$BRIDGE_TUNNEL_NAME" "$BRIDGE_HOSTNAME" 2>/dev/null || echo -e "${DIM}Bridge DNS may already exist${NC}"
+echo -e "${GREEN}✓${NC} Bridge tunnel: $BRIDGE_HOSTNAME"
 
-echo -e "${GREEN}✓${NC} DNS configured: $TUNNEL_HOSTNAME"
+# --- Management Tunnel ---
+MANAGE_TUNNEL_NAME="iphone-manage-${CLIENT_ID}"
+EXISTING_MANAGE_TUNNEL=$(cloudflared tunnel list 2>/dev/null | grep "$MANAGE_TUNNEL_NAME" | awk '{print $1}' || echo "")
 
-# Install tunnel service
-TUNNEL_PLIST="com.nightline.cloudflare-tunnel-${CLIENT_ID}.plist"
-cat > "$LAUNCH_AGENTS_DIR/$TUNNEL_PLIST" << EOF
+if [[ -n "$EXISTING_MANAGE_TUNNEL" ]]; then
+    echo -e "${DIM}Management tunnel exists: $EXISTING_MANAGE_TUNNEL${NC}"
+    MANAGE_TUNNEL_ID="$EXISTING_MANAGE_TUNNEL"
+else
+    echo -e "${DIM}Creating management tunnel...${NC}"
+    cloudflared tunnel create "$MANAGE_TUNNEL_NAME" 2>&1 | tee /tmp/cf-manage-tunnel.log
+    MANAGE_TUNNEL_ID=$(cloudflared tunnel list 2>/dev/null | grep "$MANAGE_TUNNEL_NAME" | awk '{print $1}')
+fi
+
+if [[ -z "$MANAGE_TUNNEL_ID" ]]; then
+    echo -e "${RED}Failed to create management tunnel${NC}"
+    exit 1
+fi
+
+cat > "$CF_DIR/config-manage-${CLIENT_ID}.yml" << EOF
+tunnel: $MANAGE_TUNNEL_ID
+credentials-file: $CF_DIR/$MANAGE_TUNNEL_ID.json
+
+ingress:
+  - hostname: $MANAGE_HOSTNAME
+    service: http://localhost:8081
+  - service: http_status:404
+EOF
+
+cloudflared tunnel route dns "$MANAGE_TUNNEL_NAME" "$MANAGE_HOSTNAME" 2>/dev/null || echo -e "${DIM}Management DNS may already exist${NC}"
+echo -e "${GREEN}✓${NC} Management tunnel: $MANAGE_HOSTNAME"
+
+# --- Install Tunnel Services ---
+
+# Bridge tunnel service
+BRIDGE_TUNNEL_PLIST="com.nightline.cloudflare-tunnel-bridge-${CLIENT_ID}.plist"
+cat > "$LAUNCH_AGENTS_DIR/$BRIDGE_TUNNEL_PLIST" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.nightline.cloudflare-tunnel-${CLIENT_ID}</string>
+    <string>com.nightline.cloudflare-tunnel-bridge-${CLIENT_ID}</string>
     <key>ProgramArguments</key>
     <array>
         <string>/opt/homebrew/bin/cloudflared</string>
         <string>tunnel</string>
         <string>--config</string>
-        <string>$CF_DIR/config-${CLIENT_ID}.yml</string>
+        <string>$CF_DIR/config-bridge-${CLIENT_ID}.yml</string>
         <string>run</string>
     </array>
     <key>RunAtLoad</key>
@@ -382,20 +478,52 @@ cat > "$LAUNCH_AGENTS_DIR/$TUNNEL_PLIST" << EOF
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>$LOG_DIR/tunnel.log</string>
+    <string>$LOG_DIR/tunnel-bridge.log</string>
     <key>StandardErrorPath</key>
-    <string>$LOG_DIR/tunnel.log</string>
+    <string>$LOG_DIR/tunnel-bridge.log</string>
 </dict>
 </plist>
 EOF
 
-launchctl unload "$LAUNCH_AGENTS_DIR/$TUNNEL_PLIST" 2>/dev/null || true
-launchctl load "$LAUNCH_AGENTS_DIR/$TUNNEL_PLIST"
+launchctl unload "$LAUNCH_AGENTS_DIR/$BRIDGE_TUNNEL_PLIST" 2>/dev/null || true
+launchctl load "$LAUNCH_AGENTS_DIR/$BRIDGE_TUNNEL_PLIST"
 
-echo -e "${GREEN}✓${NC} Tunnel service installed"
+# Management tunnel service
+MANAGE_TUNNEL_PLIST="com.nightline.cloudflare-tunnel-manage-${CLIENT_ID}.plist"
+cat > "$LAUNCH_AGENTS_DIR/$MANAGE_TUNNEL_PLIST" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nightline.cloudflare-tunnel-manage-${CLIENT_ID}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/cloudflared</string>
+        <string>tunnel</string>
+        <string>--config</string>
+        <string>$CF_DIR/config-manage-${CLIENT_ID}.yml</string>
+        <string>run</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>$LOG_DIR/tunnel-manage.log</string>
+    <key>StandardErrorPath</key>
+    <string>$LOG_DIR/tunnel-manage.log</string>
+</dict>
+</plist>
+EOF
 
-# Wait for tunnel to come up
-echo -e "${DIM}Waiting for tunnel to connect...${NC}"
+launchctl unload "$LAUNCH_AGENTS_DIR/$MANAGE_TUNNEL_PLIST" 2>/dev/null || true
+launchctl load "$LAUNCH_AGENTS_DIR/$MANAGE_TUNNEL_PLIST"
+
+echo -e "${GREEN}✓${NC} Tunnel services installed"
+
+# Wait for tunnels
+echo -e "${DIM}Waiting for tunnels to connect...${NC}"
 sleep 5
 
 # ===== Done! =====
@@ -407,11 +535,13 @@ echo -e "${CYAN}║${NC}  ${GREEN}✓ iPhone Bridge is Live!${NC}               
 echo -e "${CYAN}║${NC}                                                              ${CYAN}║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "  ${CYAN}Public URL:${NC}     ${GREEN}https://$TUNNEL_HOSTNAME${NC}"
+echo -e "  ${CYAN}Bridge URL:${NC}        ${GREEN}https://$BRIDGE_HOSTNAME${NC}"
+echo -e "  ${CYAN}Management URL:${NC}    ${GREEN}https://$MANAGE_HOSTNAME${NC}"
 echo ""
-echo -e "  ${CYAN}Webhook Secret:${NC} ${GREEN}$WEBHOOK_SECRET${NC}"
+echo -e "  ${CYAN}Webhook Secret:${NC}    ${GREEN}$WEBHOOK_SECRET${NC}"
+echo -e "  ${CYAN}Management Token:${NC}  ${GREEN}$MANAGEMENT_TOKEN${NC}"
 echo ""
-echo -e "  ${CYAN}Test it:${NC}        curl https://$TUNNEL_HOSTNAME/health"
+echo -e "  ${YELLOW}⚠  Save these credentials securely!${NC}"
 echo ""
 echo -e "${YELLOW}⚠  IMPORTANT: Grant Full Disk Access${NC}"
 echo ""
@@ -420,15 +550,16 @@ echo "   2. Go to Privacy & Security → Full Disk Access"
 echo "   3. Add Terminal (or your terminal app)"
 echo "   4. Add: $PYTHON_BIN"
 echo ""
-echo -e "${CYAN}Dashboard:${NC} http://localhost:8080/dashboard"
+echo -e "${CYAN}Test:${NC}"
+echo "   curl https://$BRIDGE_HOSTNAME/health"
 echo ""
 echo -e "${CYAN}Logs:${NC}"
-echo "   Bridge:  tail -f $LOG_DIR/bridge.log"
-echo "   Tunnel:  tail -f $LOG_DIR/tunnel.log"
-echo "   Updates: tail -f $LOG_DIR/updater.log"
+echo "   Bridge:     tail -f $LOG_DIR/bridge.log"
+echo "   Management: tail -f $LOG_DIR/management.log"
+echo "   Tunnels:    tail -f $LOG_DIR/tunnel-bridge.log"
 echo ""
 
-# Open dashboard in browser
-echo -e "${YELLOW}Opening dashboard in browser...${NC}"
+# Open management dashboard
+echo -e "${YELLOW}Opening management dashboard...${NC}"
 sleep 3
-open "http://localhost:8080/dashboard" 2>/dev/null || echo "Open http://localhost:8080/dashboard in your browser"
+open "https://$MANAGE_HOSTNAME" 2>/dev/null || echo "Open https://$MANAGE_HOSTNAME in your browser"

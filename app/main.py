@@ -25,7 +25,6 @@ from app.config import settings
 from app.imessage import IncomingMessage, iMessageSender, iMessageWatcher, MockiMessageWatcher, MockiMessageSender
 from app.webhooks import NightlineClient, SendMessageRequest, SendMessageResponse
 from app.services.queue import MessageQueue
-from app.dashboard import router as dashboard_router
 
 # Configure logging
 logging.basicConfig(
@@ -184,8 +183,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include dashboard router
-app.include_router(dashboard_router)
 
 
 # --- Authentication ---

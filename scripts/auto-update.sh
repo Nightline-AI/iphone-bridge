@@ -1,6 +1,6 @@
 #!/bin/bash
 # iPhone Bridge Auto-Updater
-# Checks for updates and restarts if needed
+# Checks for updates and restarts services if needed
 
 set -e
 
@@ -14,7 +14,12 @@ log() {
 
 # Prevent concurrent runs
 if [[ -f "$LOCK_FILE" ]]; then
-    exit 0
+    # Check if lock is stale (older than 10 minutes)
+    if [[ $(find "$LOCK_FILE" -mmin +10 2>/dev/null) ]]; then
+        rm -f "$LOCK_FILE"
+    else
+        exit 0
+    fi
 fi
 touch "$LOCK_FILE"
 trap "rm -f $LOCK_FILE" EXIT
@@ -48,10 +53,19 @@ pip install -q fastapi "uvicorn[standard]" pydantic pydantic-settings httpx watc
 log "Dependencies updated"
 
 # Restart the bridge service
+log "Restarting bridge..."
 launchctl kickstart -k "gui/$(id -u)/com.nightline.iphone-bridge" 2>/dev/null || {
     launchctl unload "$HOME/Library/LaunchAgents/com.nightline.iphone-bridge.plist" 2>/dev/null || true
     launchctl load "$HOME/Library/LaunchAgents/com.nightline.iphone-bridge.plist"
 }
 log "Bridge restarted"
+
+# Restart the management agent
+log "Restarting management agent..."
+launchctl kickstart -k "gui/$(id -u)/com.nightline.management-agent" 2>/dev/null || {
+    launchctl unload "$HOME/Library/LaunchAgents/com.nightline.management-agent.plist" 2>/dev/null || true
+    launchctl load "$HOME/Library/LaunchAgents/com.nightline.management-agent.plist"
+}
+log "Management agent restarted"
 
 log "Update complete!"

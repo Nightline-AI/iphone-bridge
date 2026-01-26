@@ -4,19 +4,20 @@ This guide covers how to set up secure remote access to your Mac Mini fleet runn
 
 ## Overview of Options
 
-| Solution | Best For | Complexity | Cost |
-|----------|----------|------------|------|
-| **Tailscale** | Remote management + API access | Easy | Free |
-| **Cloudflare Tunnel** | Exposing bridge to Nightline server | Medium | Free |
-| **SSH + Tailscale** | Terminal access for debugging | Easy | Free |
-| **Apple Remote Desktop** | GUI management of fleet | Easy | $80 |
-| **Jump Host / Bastion** | Enterprise security | Complex | Varies |
+| Solution                 | Best For                            | Complexity | Cost   |
+| ------------------------ | ----------------------------------- | ---------- | ------ |
+| **Tailscale**            | Remote management + API access      | Easy       | Free   |
+| **Cloudflare Tunnel**    | Exposing bridge to Nightline server | Medium     | Free   |
+| **SSH + Tailscale**      | Terminal access for debugging       | Easy       | Free   |
+| **Apple Remote Desktop** | GUI management of fleet             | Easy       | $80    |
+| **Jump Host / Bastion**  | Enterprise security                 | Complex    | Varies |
 
 ---
 
 ## Recommended Setup: Tailscale + Cloudflare Tunnel
 
 Use **both** for the best of both worlds:
+
 - **Tailscale**: Remote management, SSH, debugging
 - **Cloudflare Tunnel**: Expose bridge API to Nightline server
 
@@ -164,6 +165,7 @@ Save as `/Library/LaunchDaemons/com.cloudflare.cloudflared.plist`:
 ```
 
 Load it:
+
 ```bash
 sudo launchctl load /Library/LaunchDaemons/com.cloudflare.cloudflared.plist
 ```
@@ -209,6 +211,7 @@ ssh -p 2222 nightline@your-public-ip.com
 For GUI-based fleet management:
 
 1. **Enable Screen Sharing** on each Mac Mini:
+
    - System Settings → General → Sharing → Screen Sharing
 
 2. **Buy Apple Remote Desktop** from the Mac App Store ($79.99)
@@ -247,20 +250,20 @@ echo ""
 for entry in "${BRIDGES[@]}"; do
     NAME="${entry%%:*}"
     HOST="${entry##*:}"
-    
+
     STATUS=$(curl -s --connect-timeout 5 "http://$HOST:8080/health" 2>/dev/null)
-    
+
     if [[ -n "$STATUS" ]]; then
         HEALTH=$(echo "$STATUS" | jq -r '.status')
         UPTIME=$(echo "$STATUS" | jq -r '.uptime_seconds | . / 3600 | floor')
         RECV=$(echo "$STATUS" | jq -r '.stats.messages_received')
-        
+
         case "$HEALTH" in
             healthy)  ICON="✅" ;;
             degraded) ICON="⚠️" ;;
             *)        ICON="❌" ;;
         esac
-        
+
         echo "$ICON $NAME: $HEALTH (${UPTIME}h uptime, $RECV msgs)"
     else
         echo "❌ $NAME: UNREACHABLE"
@@ -342,9 +345,9 @@ BRIDGES=(
 for entry in "${BRIDGES[@]}"; do
     NAME="${entry%%:*}"
     URL="${entry##*:}"
-    
+
     STATUS=$(curl -s --connect-timeout 10 "$URL" | jq -r '.status' 2>/dev/null)
-    
+
     if [[ "$STATUS" != "healthy" ]]; then
         curl -X POST "$WEBHOOK_URL" \
             -H 'Content-Type: application/json' \
