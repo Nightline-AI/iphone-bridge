@@ -552,13 +552,42 @@ DASHBOARD_HTML = """
             color: var(--yellow);
         }
         
+        .action-group {
+            margin-bottom: 1.25rem;
+        }
+        
+        .action-group:last-child {
+            margin-bottom: 0;
+        }
+        
+        .action-label {
+            font-size: 0.6875rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        
+        .update-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+        
         .update-status {
             display: flex;
             align-items: center;
             gap: 0.5rem;
             font-size: 0.8125rem;
             color: var(--text-secondary);
-            margin-bottom: 1rem;
         }
         
         .update-status.up-to-date {
@@ -665,23 +694,24 @@ DASHBOARD_HTML = """
             <div class="card">
                 <div class="card-header">Actions</div>
                 <div class="card-body">
-                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                        <button class="btn" onclick="restartService('bridge')">Restart Bridge</button>
-                        <button class="btn" onclick="restartService('tunnel-bridge')">Restart Tunnel</button>
+                    <div class="action-group">
+                        <div class="action-label">Services</div>
+                        <div class="action-buttons">
+                            <button class="btn" onclick="restartService('bridge')">Restart Bridge</button>
+                            <button class="btn" onclick="restartService('tunnel-bridge')">Restart Tunnel</button>
+                            <button class="btn" onclick="restartService('management')">Restart Management</button>
+                        </div>
                     </div>
-                </div>
-            </div>
-            
-            <div class="card">
-                <div class="card-header">Updates</div>
-                <div class="card-body">
-                    <div class="update-status" id="update-status">
-                        <span class="spinner"></span>
-                        <span>Checking...</span>
+                    <div class="action-group">
+                        <div class="action-label">Software</div>
+                        <div class="update-row">
+                            <div class="update-status" id="update-status">
+                                <span class="spinner"></span>
+                                <span>Checking...</span>
+                            </div>
+                            <button class="btn" id="update-btn" style="display: none;">Update</button>
+                        </div>
                     </div>
-                    <button class="btn btn-primary" id="update-btn" style="display: none;">
-                        Update Now
-                    </button>
                 </div>
             </div>
             
@@ -788,11 +818,23 @@ DASHBOARD_HTML = """
         }
         
         async function restartService(name) {
+            if (name === 'management') {
+                if (!confirm('This will restart the management agent. You may need to refresh the page. Continue?')) {
+                    return;
+                }
+            }
+            
             try {
                 const res = await fetch(`/api/services/${name}/restart`, { method: 'POST', credentials: 'same-origin' });
                 const data = await res.json();
                 showToast(data.message, data.success ? 'success' : 'error');
-                setTimeout(loadStatus, 2000);
+                
+                if (name === 'management' && data.success) {
+                    showToast('Reconnecting...', 'success');
+                    setTimeout(() => window.location.reload(), 3000);
+                } else {
+                    setTimeout(loadStatus, 2000);
+                }
             } catch (e) {
                 showToast('Failed to restart', 'error');
             }
@@ -823,16 +865,18 @@ DASHBOARD_HTML = """
                 if (data.has_updates) {
                     status.className = 'update-status has-update';
                     status.innerHTML = `Update available <span class="version">${data.current_commit} → ${data.remote_commit}</span>`;
-                    btn.style.display = 'block';
+                    btn.style.display = 'inline-block';
                     btn.textContent = 'Update Now';
+                    btn.className = 'btn btn-primary';
                     btn.disabled = false;
                     btn.onclick = performUpdate;
                 } else {
                     status.className = 'update-status up-to-date';
-                    status.innerHTML = `Up to date <span class="version">${data.current_commit} (${data.current_branch})</span>`;
-                    btn.style.display = 'block';
-                    btn.textContent = 'Check Again';
+                    status.innerHTML = `Up to date <span class="version">${data.current_commit}</span>`;
+                    btn.style.display = 'inline-block';
+                    btn.textContent = 'Check';
                     btn.className = 'btn';
+                    btn.disabled = false;
                     btn.onclick = checkForUpdates;
                 }
             } catch (e) {

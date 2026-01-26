@@ -148,13 +148,6 @@ async def restart(service: str) -> ServiceAction:
     if service not in all_services:
         raise HTTPException(status_code=404, detail=f"Unknown service: {service}")
     
-    # Don't allow restarting management from itself
-    if service == "management":
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot restart management agent from itself. Use SSH.",
-        )
-    
     success, message = restart_service(all_services[service])
     return ServiceAction(success=success, message=message)
 
