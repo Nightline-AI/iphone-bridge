@@ -1,9 +1,9 @@
 #!/bin/bash
 # iPhone Bridge Bootstrap Installer
-# Run with: curl -fsSL https://install.nightline.ai/iphone-bridge | bash
+# Run with: curl -fsSL https://raw.githubusercontent.com/Nightline-AI/iphone-bridge/main/scripts/bootstrap.sh | bash
 #
 # Or for a specific client:
-# curl -fsSL https://install.nightline.ai/iphone-bridge | bash -s -- --client-id abc123
+# curl -fsSL https://raw.githubusercontent.com/Nightline-AI/iphone-bridge/main/scripts/bootstrap.sh | bash -s -- --client-id abc123
 
 set -e
 
@@ -15,7 +15,7 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configuration
-REPO_URL="https://github.com/nightline/iphone-bridge"
+REPO_URL="https://github.com/Nightline-AI/iphone-bridge"
 INSTALL_DIR="$HOME/iphone-bridge"
 NIGHTLINE_API="https://api.nightline.ai"
 LOG_DIR="/var/log/iphone-bridge"
