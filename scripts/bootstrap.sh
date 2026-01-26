@@ -134,13 +134,6 @@ else
 fi
 echo -e "${GREEN}✓${NC} Python $PYTHON_VERSION"
 
-# Install Poetry via Homebrew (avoids venv symlink issues)
-if ! command -v poetry &> /dev/null; then
-    echo -e "${YELLOW}Installing Poetry...${NC}"
-    brew install poetry
-fi
-echo -e "${GREEN}✓${NC} Poetry installed"
-
 # ===== Clone Repository =====
 
 echo ""
@@ -156,30 +149,32 @@ else
     cd "$INSTALL_DIR"
 fi
 
-# ===== Install Dependencies =====
+# ===== Install Dependencies (using pip, no Poetry) =====
 
 echo -e "${YELLOW}Installing dependencies...${NC}"
 
-# Fix for Homebrew Python venv issue on macOS
-# Create venv manually with --copies to avoid symlink issues
 VENV_DIR="$INSTALL_DIR/.venv"
-if [[ ! -d "$VENV_DIR" ]]; then
-    echo -e "${DIM}Creating virtual environment...${NC}"
-    python3 -m venv --copies "$VENV_DIR" || {
-        # Fallback: try without --copies
-        python3 -m venv "$VENV_DIR"
-    }
+PYTHON_BIN="$VENV_DIR/bin/python"
+
+# Remove old venv if exists
+rm -rf "$VENV_DIR"
+
+# Create venv - try multiple methods
+echo -e "${DIM}Creating virtual environment...${NC}"
+if ! python3 -m venv --copies "$VENV_DIR" 2>/dev/null; then
+    if ! python3 -m venv "$VENV_DIR" 2>/dev/null; then
+        # Last resort: use virtualenv package
+        echo -e "${YELLOW}Trying virtualenv...${NC}"
+        pip3 install --user virtualenv
+        python3 -m virtualenv "$VENV_DIR"
+    fi
 fi
 
-# Tell Poetry to use the existing venv
-export POETRY_VIRTUALENVS_IN_PROJECT=true
-export POETRY_VIRTUALENVS_CREATE=false
-
-# Activate and install
+# Install dependencies directly with pip
 source "$VENV_DIR/bin/activate"
-poetry install --no-interaction
+pip install --upgrade pip
+pip install fastapi "uvicorn[standard]" pydantic pydantic-settings httpx watchdog
 
-POETRY_PYTHON="$VENV_DIR/bin/python"
 echo -e "${GREEN}✓${NC} Dependencies installed"
 
 # ===== Generate Configuration =====
@@ -256,7 +251,7 @@ if [[ "$SKIP_SERVICE" != "true" ]]; then
     
     <key>ProgramArguments</key>
     <array>
-        <string>$POETRY_PYTHON</string>
+        <string>$PYTHON_BIN</string>
         <string>-m</string>
         <string>uvicorn</string>
         <string>app.main:app</string>
@@ -324,7 +319,7 @@ echo ""
 echo "   1. Open System Settings"
 echo "   2. Go to Privacy & Security → Full Disk Access"
 echo "   3. Click + and add Terminal (or your terminal app)"
-echo "   4. Also add: $POETRY_PYTHON"
+echo "   4. Also add: $PYTHON_BIN"
 echo ""
 
 if [[ -z "$CLIENT_ID" ]]; then
