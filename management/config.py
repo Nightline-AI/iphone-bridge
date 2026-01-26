@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     cookie_name: str = "mgmt_session"
     cookie_max_age: int = 60 * 60 * 24 * 30  # 30 days
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
     @property
     def env_file_path(self) -> Path:
