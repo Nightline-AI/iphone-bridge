@@ -41,10 +41,10 @@ A Mac Mini server that bridges iMessage/SMS communication between an iPhone and 
 ### One-Line Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Nightline-AI/iphone-bridge/main/scripts/bootstrap.sh | bash -s -- \
-  --client-id YOUR_CLIENT_ID \
-  --cloudflare-token YOUR_CLOUDFLARE_TOKEN
+curl -fsSL https://raw.githubusercontent.com/Nightline-AI/iphone-bridge/main/scripts/bootstrap.sh | bash -s -- --client-id YOUR_CLIENT_ID --cloudflare-token YOUR_CLOUDFLARE_TOKEN
 ```
+
+**First time only:** Run `cloudflared tunnel login` first to authenticate with Cloudflare.
 
 This will:
 
