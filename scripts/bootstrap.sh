@@ -297,8 +297,23 @@ TUNNEL_NAME="iphone-bridge-${CLIENT_ID}"
 CF_DIR="$HOME/.cloudflared"
 mkdir -p "$CF_DIR"
 
-# Store token for cloudflared
-export CLOUDFLARE_API_TOKEN="$CLOUDFLARE_TOKEN"
+# Check if already logged in (cert.pem exists)
+if [[ ! -f "$CF_DIR/cert.pem" ]]; then
+    echo ""
+    echo -e "${CYAN}Cloudflare login required (one-time setup)${NC}"
+    echo ""
+    echo "A browser window will open. Log in to Cloudflare and select '$TUNNEL_DOMAIN'."
+    echo ""
+    read -p "Press Enter to open browser..."
+    
+    cloudflared tunnel login
+    
+    if [[ ! -f "$CF_DIR/cert.pem" ]]; then
+        echo -e "${RED}Login failed. Please try again.${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓${NC} Cloudflare authenticated"
+fi
 
 # Check if tunnel already exists
 EXISTING_TUNNEL=$(cloudflared tunnel list 2>/dev/null | grep "$TUNNEL_NAME" | awk '{print $1}' || echo "")
@@ -308,13 +323,12 @@ if [[ -n "$EXISTING_TUNNEL" ]]; then
     TUNNEL_ID="$EXISTING_TUNNEL"
 else
     echo -e "${DIM}Creating tunnel...${NC}"
-    # Create tunnel and capture the ID
     cloudflared tunnel create "$TUNNEL_NAME" 2>&1 | tee /tmp/cf-tunnel-create.log
     TUNNEL_ID=$(cloudflared tunnel list 2>/dev/null | grep "$TUNNEL_NAME" | awk '{print $1}')
 fi
 
 if [[ -z "$TUNNEL_ID" ]]; then
-    echo -e "${RED}Failed to create tunnel. Check your Cloudflare token.${NC}"
+    echo -e "${RED}Failed to create tunnel. Please run 'cloudflared tunnel login' manually.${NC}"
     exit 1
 fi
 
