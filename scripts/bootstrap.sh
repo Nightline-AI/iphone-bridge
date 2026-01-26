@@ -188,7 +188,7 @@ fi
 
 source "$VENV_DIR/bin/activate"
 pip install --upgrade pip -q
-pip install fastapi "uvicorn[standard]" pydantic pydantic-settings httpx watchdog -q
+pip install fastapi "uvicorn[standard]" pydantic pydantic-settings httpx watchdog python-multipart -q
 
 echo -e "${GREEN}✓${NC} Dependencies installed"
 

@@ -49,7 +49,7 @@ log "Pulled latest changes"
 
 # Reinstall dependencies
 source "$INSTALL_DIR/.venv/bin/activate"
-pip install -q fastapi "uvicorn[standard]" pydantic pydantic-settings httpx watchdog
+pip install -q fastapi "uvicorn[standard]" pydantic pydantic-settings httpx watchdog python-multipart
 log "Dependencies updated"
 
 # Restart the bridge service
