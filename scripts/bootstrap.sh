@@ -134,11 +134,10 @@ else
 fi
 echo -e "${GREEN}✓${NC} Python $PYTHON_VERSION"
 
-# Install Poetry
+# Install Poetry via Homebrew (avoids venv symlink issues)
 if ! command -v poetry &> /dev/null; then
     echo -e "${YELLOW}Installing Poetry...${NC}"
-    curl -sSL https://install.python-poetry.org | python3 -
-    export PATH="$HOME/.local/bin:$PATH"
+    brew install poetry
 fi
 echo -e "${GREEN}✓${NC} Poetry installed"
 
