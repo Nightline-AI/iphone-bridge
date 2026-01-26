@@ -148,7 +148,7 @@ LOGIN_HTML = """
 </head>
 <body>
     <div class="card">
-        <h1>🔐 iPhone Bridge</h1>
+        <h1>iPhone Bridge</h1>
         <p class="subtitle">Enter your management token</p>
         
         {{ERROR}}
@@ -552,28 +552,47 @@ DASHBOARD_HTML = """
             color: var(--yellow);
         }
         
-        .update-section {
+        .update-status {
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            padding-top: 0.75rem;
-            border-top: 1px solid var(--border);
+            gap: 0.5rem;
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
         }
         
-        .update-info {
+        .update-status.up-to-date {
+            color: var(--green);
+        }
+        
+        .update-status.has-update {
+            color: var(--yellow);
+        }
+        
+        .update-status .version {
+            font-family: 'SF Mono', monospace;
             font-size: 0.75rem;
             color: var(--text-muted);
         }
         
-        .update-available {
-            color: var(--yellow);
+        .spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>📱 iPhone Bridge</h1>
+            <h1>iPhone Bridge</h1>
             <div class="header-right">
                 <a href="/logout" class="logout-btn">Logout</a>
             </div>
@@ -646,18 +665,23 @@ DASHBOARD_HTML = """
             <div class="card">
                 <div class="card-header">Actions</div>
                 <div class="card-body">
-                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                         <button class="btn" onclick="restartService('bridge')">Restart Bridge</button>
                         <button class="btn" onclick="restartService('tunnel-bridge')">Restart Tunnel</button>
                     </div>
-                    <div class="update-section">
-                        <div class="update-info" id="update-info">
-                            <span class="mono" id="current-version">...</span>
-                        </div>
-                        <button class="btn btn-primary" id="update-btn" onclick="performUpdate()">
-                            Check for Updates
-                        </button>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-header">Updates</div>
+                <div class="card-body">
+                    <div class="update-status" id="update-status">
+                        <span class="spinner"></span>
+                        <span>Checking...</span>
                     </div>
+                    <button class="btn btn-primary" id="update-btn" style="display: none;">
+                        Update Now
+                    </button>
                 </div>
             </div>
             
@@ -785,48 +809,65 @@ DASHBOARD_HTML = """
         }
         
         async function checkForUpdates() {
+            const status = document.getElementById('update-status');
+            const btn = document.getElementById('update-btn');
+            
+            status.className = 'update-status';
+            status.innerHTML = '<span class="spinner"></span><span>Checking for updates...</span>';
+            btn.style.display = 'none';
+            
             try {
                 const res = await fetch('/api/update', { credentials: 'same-origin' });
                 const data = await res.json();
                 
-                const info = document.getElementById('update-info');
-                const btn = document.getElementById('update-btn');
-                
                 if (data.has_updates) {
-                    info.innerHTML = `<span class="update-available">Update available: ${data.current_commit} → ${data.remote_commit}</span>`;
+                    status.className = 'update-status has-update';
+                    status.innerHTML = `Update available <span class="version">${data.current_commit} → ${data.remote_commit}</span>`;
+                    btn.style.display = 'block';
                     btn.textContent = 'Update Now';
+                    btn.disabled = false;
                     btn.onclick = performUpdate;
                 } else {
-                    info.innerHTML = `<span class="mono">${data.current_commit}</span> (${data.current_branch})`;
-                    btn.textContent = 'Check for Updates';
+                    status.className = 'update-status up-to-date';
+                    status.innerHTML = `Up to date <span class="version">${data.current_commit} (${data.current_branch})</span>`;
+                    btn.style.display = 'block';
+                    btn.textContent = 'Check Again';
+                    btn.className = 'btn';
                     btn.onclick = checkForUpdates;
                 }
             } catch (e) {
-                console.error('Update check failed:', e);
+                status.className = 'update-status';
+                status.innerHTML = 'Failed to check for updates';
+                btn.style.display = 'block';
+                btn.textContent = 'Retry';
+                btn.onclick = checkForUpdates;
             }
         }
         
         async function performUpdate() {
+            const status = document.getElementById('update-status');
             const btn = document.getElementById('update-btn');
+            
+            status.className = 'update-status';
+            status.innerHTML = '<span class="spinner"></span><span>Updating...</span>';
             btn.disabled = true;
-            btn.textContent = 'Updating...';
             
             try {
                 const res = await fetch('/api/update', { method: 'POST', credentials: 'same-origin' });
                 const data = await res.json();
                 
                 if (data.success) {
-                    showToast('Updating... page will reload', 'success');
+                    status.innerHTML = '<span class="spinner"></span><span>Restarting services...</span>';
                     setTimeout(() => window.location.reload(), 5000);
                 } else {
-                    showToast('Update failed', 'error');
+                    status.innerHTML = 'Update failed';
                     btn.disabled = false;
-                    btn.textContent = 'Retry Update';
+                    btn.textContent = 'Retry';
                 }
             } catch (e) {
-                showToast('Update failed', 'error');
+                status.innerHTML = 'Update failed';
                 btn.disabled = false;
-                btn.textContent = 'Retry Update';
+                btn.textContent = 'Retry';
             }
         }
         
