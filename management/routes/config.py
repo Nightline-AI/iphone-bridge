@@ -18,6 +18,7 @@ class BridgeConfig(BaseModel):
     webhook_secret: str
     poll_interval: float
     log_level: str
+    display_name: str
 
 
 class ConfigResponse(BaseModel):
@@ -32,6 +33,7 @@ class ConfigUpdate(BaseModel):
     webhook_secret: Optional[str] = None
     poll_interval: Optional[float] = None
     log_level: Optional[str] = None
+    display_name: Optional[str] = None
 
 
 def read_env() -> dict[str, str]:
@@ -87,6 +89,7 @@ async def get_config() -> ConfigResponse:
             webhook_secret=env.get("WEBHOOK_SECRET", ""),
             poll_interval=float(env.get("POLL_INTERVAL", "2.0")),
             log_level=env.get("LOG_LEVEL", "INFO"),
+            display_name=env.get("BRIDGE_DISPLAY_NAME", "iPhone Bridge"),
         ),
         tunnel_url=settings.tunnel_url,
         management_url=settings.management_url,
@@ -114,6 +117,8 @@ async def update_config(update: ConfigUpdate) -> dict:
         if update.log_level.upper() not in ["DEBUG", "INFO", "WARNING", "ERROR"]:
             raise HTTPException(400, "Invalid log level")
         updates["LOG_LEVEL"] = update.log_level.upper()
+    if update.display_name is not None:
+        updates["BRIDGE_DISPLAY_NAME"] = update.display_name
 
     if not updates:
         raise HTTPException(400, "No updates provided")

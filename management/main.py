@@ -259,9 +259,43 @@ DASHBOARD_HTML = """
             border-bottom: 1px solid var(--border);
         }
         
+        .header-left {
+            display: flex;
+            flex-direction: column;
+            gap: 0.375rem;
+        }
+        
         header h1 {
             font-size: 1.5rem;
             font-weight: 600;
+        }
+        
+        .identifier-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
+            padding: 0.25rem 0.5rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-family: 'SF Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            width: fit-content;
+        }
+        
+        .identifier-badge:hover {
+            color: var(--text-secondary);
+            border-color: var(--text-muted);
+        }
+        
+        .identifier-badge .copy-icon {
+            opacity: 0.5;
+        }
+        
+        .identifier-badge:hover .copy-icon {
+            opacity: 1;
         }
         
         .header-right {
@@ -762,7 +796,13 @@ DASHBOARD_HTML = """
 <body>
     <div class="container">
         <header>
-            <h1>iPhone Bridge</h1>
+            <div class="header-left">
+                <h1 id="bridge-name">iPhone Bridge</h1>
+                <div class="identifier-badge" onclick="copyIdentifier()" title="Click to copy">
+                    <span id="bridge-id">Loading...</span>
+                    <span class="copy-icon">📋</span>
+                </div>
+            </div>
             <div class="header-right">
                 <a href="/logout" class="logout-btn">Logout</a>
             </div>
@@ -815,6 +855,10 @@ DASHBOARD_HTML = """
                 <div class="card-header">Configuration</div>
                 <div class="card-body">
                     <form id="config-form">
+                        <div class="form-group">
+                            <label>Display Name</label>
+                            <input type="text" id="display-name" name="display_name" placeholder="e.g., Reception Mac Pro">
+                        </div>
                         <div class="form-group">
                             <label>Server URL</label>
                             <input type="url" id="server-url" name="nightline_server_url">
@@ -982,6 +1026,17 @@ DASHBOARD_HTML = """
                 const res = await fetch('/api/config', { credentials: 'same-origin' });
                 const data = await res.json();
                 
+                // Update header with display name and identifier
+                const displayName = data.config.display_name || 'iPhone Bridge';
+                const clientId = data.config.nightline_client_id || '';
+                
+                document.getElementById('bridge-name').textContent = displayName;
+                document.getElementById('bridge-id').textContent = clientId 
+                    ? `bridge-${clientId.substring(0, 8)}` 
+                    : 'Not configured';
+                
+                // Update form fields
+                document.getElementById('display-name').value = data.config.display_name || '';
                 document.getElementById('server-url').value = data.config.nightline_server_url || '';
                 document.getElementById('client-id').value = data.config.nightline_client_id || '';
                 document.getElementById('webhook-secret').value = data.config.webhook_secret || '';
@@ -993,6 +1048,12 @@ DASHBOARD_HTML = """
             } catch (e) {
                 console.error('Config load failed:', e);
             }
+        }
+        
+        function copyIdentifier() {
+            const idEl = document.getElementById('bridge-id');
+            navigator.clipboard.writeText(idEl.textContent);
+            showToast('Identifier copied', 'success');
         }
         
         async function restartService(name) {
@@ -1097,6 +1158,7 @@ DASHBOARD_HTML = """
             e.preventDefault();
             
             const update = {
+                display_name: document.getElementById('display-name').value,
                 nightline_server_url: document.getElementById('server-url').value,
                 nightline_client_id: document.getElementById('client-id').value,
                 webhook_secret: document.getElementById('webhook-secret').value,
@@ -1112,6 +1174,10 @@ DASHBOARD_HTML = """
                 const data = await res.json();
                 
                 if (data.success) {
+                    // Update header immediately with new display name
+                    if (update.display_name) {
+                        document.getElementById('bridge-name').textContent = update.display_name;
+                    }
                     showToast('Config saved. Restarting bridge...', 'success');
                     await restartService('bridge');
                 } else {

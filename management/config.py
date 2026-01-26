@@ -22,6 +22,9 @@ class Settings(BaseSettings):
 
     # Bridge info (read from shared .env)
     nightline_client_id: str = ""
+    
+    # Display name for the bridge (shown in dashboard header)
+    bridge_display_name: str = "iPhone Bridge"
 
     # Cookie settings
     cookie_name: str = "mgmt_session"

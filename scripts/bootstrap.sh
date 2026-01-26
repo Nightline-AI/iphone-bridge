@@ -150,9 +150,6 @@ sudo pmset -a womp 1 2>/dev/null || true
 # Auto-restart after power failure
 sudo pmset -a autorestart 1 2>/dev/null || true
 
-# Restart automatically if the system freezes
-sudo pmset -a restartfreeze 1 2>/dev/null || true
-
 # Disable App Nap for better background performance
 defaults write NSGlobalDomain NSAppSleepDisabled -bool YES 2>/dev/null || true
 
