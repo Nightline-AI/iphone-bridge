@@ -292,10 +292,15 @@ DASHBOARD_HTML = """
         
         .identifier-badge .copy-icon {
             opacity: 0.5;
+            flex-shrink: 0;
         }
         
         .identifier-badge:hover .copy-icon {
             opacity: 1;
+        }
+        
+        .identifier-badge svg {
+            display: block;
         }
         
         .header-right {
@@ -800,7 +805,10 @@ DASHBOARD_HTML = """
                 <h1 id="bridge-name">iPhone Bridge</h1>
                 <div class="identifier-badge" onclick="copyIdentifier()" title="Click to copy">
                     <span id="bridge-id">Loading...</span>
-                    <span class="copy-icon">📋</span>
+                    <svg class="copy-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
                 </div>
             </div>
             <div class="header-right">
