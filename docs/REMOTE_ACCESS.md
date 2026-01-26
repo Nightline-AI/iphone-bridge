@@ -54,9 +54,9 @@ tailscale up
 tailscale status
 
 # Example output:
-# 100.x.x.1  mac-mini-1      shaanfulton@ macOS  -
-# 100.x.x.2  mac-mini-2      shaanfulton@ macOS  -
-# 100.x.x.3  my-laptop       shaanfulton@ macOS  -
+# 100.x.x.1  mac-mini-1      yourname@ macOS  -
+# 100.x.x.2  mac-mini-2      yourname@ macOS  -
+# 100.x.x.3  my-laptop       yourname@ macOS  -
 ```
 
 ### SSH Configuration
