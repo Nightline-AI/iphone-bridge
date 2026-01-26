@@ -44,21 +44,21 @@ A Mac Mini server that bridges iMessage/SMS communication between an iPhone and 
 curl -fsSL https://tinyurl.com/288nshhu | bash
 ```
 
-**With ngrok tunnel (get a public URL automatically):**
+**With public tunnel (get a URL automatically, no signup):**
 
 ```bash
-curl -fsSL https://tinyurl.com/288nshhu | bash -s -- --ngrok
+curl -fsSL https://tinyurl.com/288nshhu | bash -s -- --tunnel
 ```
 
 This will:
 
-- Install all dependencies (Python, Poetry, ngrok)
+- Install all dependencies (Python, pip)
 - Clone and configure the bridge
 - Generate a secure webhook secret
 - Install as a system service that starts on boot
-- Set up ngrok tunnel and **display your public URL**
+- Create a public tunnel and **display your public URL**
 
-> 💡 You'll need a free ngrok account. Get your auth token at [ngrok.com](https://dashboard.ngrok.com/get-started/your-authtoken)
+> 💡 Uses SSH tunneling (built into macOS) - no account or signup required!
 
 ### Manual Installation
 

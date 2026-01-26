@@ -45,13 +45,9 @@ while [[ $# -gt 0 ]]; do
             SKIP_SERVICE=true
             shift
             ;;
-        --ngrok)
-            SETUP_NGROK=true
+        --tunnel)
+            SETUP_TUNNEL=true
             shift
-            ;;
-        --ngrok-token)
-            NGROK_TOKEN="$2"
-            shift 2
             ;;
         --help)
             echo "iPhone Bridge Installer"
@@ -63,8 +59,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --secret SECRET     Webhook secret (auto-generated if not provided)"
             echo "  --server-url URL    Nightline server URL (default: $NIGHTLINE_API)"
             echo "  --no-service        Don't install as system service"
-            echo "  --ngrok             Set up ngrok tunnel for public URL"
-            echo "  --ngrok-token TOKEN Your ngrok auth token (get from ngrok.com)"
+            echo "  --tunnel            Expose bridge with public URL (no signup required)"
             echo "  --help              Show this help message"
             exit 0
             ;;
@@ -384,113 +379,117 @@ echo -e "${CYAN}Webhook Secret (save this for Nightline dashboard):${NC}"
 echo -e "${GREEN}$WEBHOOK_SECRET${NC}"
 echo ""
 
-# ===== ngrok Setup (Optional) =====
+# ===== Tunnel Setup (Optional) =====
 
-if [[ "$SETUP_NGROK" == "true" ]]; then
+if [[ "$SETUP_TUNNEL" == "true" ]]; then
     echo ""
-    echo -e "${CYAN}Setting up ngrok tunnel...${NC}"
+    echo -e "${CYAN}Setting up public tunnel...${NC}"
     
-    # Install ngrok
-    if ! command -v ngrok &>/dev/null; then
-        echo -e "${YELLOW}Installing ngrok...${NC}"
-        brew install ngrok
-    fi
-    echo -e "${GREEN}✓${NC} ngrok installed"
+    # Create tunnel script that uses SSH (built into macOS, no install needed)
+    TUNNEL_SCRIPT="$INSTALL_DIR/scripts/tunnel.sh"
+    cat > "$TUNNEL_SCRIPT" << 'TUNNELEOF'
+#!/bin/bash
+# Tunnel script - exposes bridge via localhost.run (free, no signup)
+# Uses SSH which is built into macOS
+
+LOG_FILE="/var/log/iphone-bridge/tunnel.log"
+
+while true; do
+    echo "[$(date)] Starting tunnel..." >> "$LOG_FILE"
     
-    # Configure ngrok auth token
-    if [[ -n "$NGROK_TOKEN" ]]; then
-        ngrok config add-authtoken "$NGROK_TOKEN"
-        echo -e "${GREEN}✓${NC} ngrok authenticated"
-    elif [[ ! -f "$HOME/.config/ngrok/ngrok.yml" ]] && [[ ! -f "$HOME/Library/Application Support/ngrok/ngrok.yml" ]]; then
-        echo ""
-        echo -e "${YELLOW}ngrok requires authentication.${NC}"
-        echo "Get your free auth token at: https://dashboard.ngrok.com/get-started/your-authtoken"
-        echo ""
-        read -p "Enter your ngrok auth token (or press Enter to skip): " NGROK_TOKEN
-        if [[ -n "$NGROK_TOKEN" ]]; then
-            ngrok config add-authtoken "$NGROK_TOKEN"
-            echo -e "${GREEN}✓${NC} ngrok authenticated"
-        else
-            echo -e "${YELLOW}Skipping ngrok setup. Run manually later: ngrok http 8080${NC}"
-            SETUP_NGROK=false
+    # localhost.run gives us a public URL via SSH - no signup needed
+    ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -R 80:localhost:8080 nokey@localhost.run 2>&1 | while read line; do
+        echo "[$(date)] $line" >> "$LOG_FILE"
+        # Extract and save the URL when it appears
+        if [[ "$line" == *"tunneled with tls termination"* ]] || [[ "$line" == *"https://"* ]]; then
+            URL=$(echo "$line" | grep -oE 'https://[a-z0-9]+\.lhr\.life' | head -1)
+            if [[ -n "$URL" ]]; then
+                echo "$URL" > /tmp/iphone-bridge-tunnel-url
+                echo "[$(date)] Tunnel URL: $URL" >> "$LOG_FILE"
+            fi
         fi
-    fi
+    done
     
-    if [[ "$SETUP_NGROK" == "true" ]]; then
-        # Create ngrok launchd plist
-        NGROK_PLIST="$HOME/Library/LaunchAgents/com.ngrok.iphone-bridge.plist"
-        
-        cat > "$NGROK_PLIST" << EOF
+    echo "[$(date)] Tunnel disconnected, restarting in 5s..." >> "$LOG_FILE"
+    sleep 5
+done
+TUNNELEOF
+    chmod +x "$TUNNEL_SCRIPT"
+    
+    # Create launchd plist for tunnel
+    TUNNEL_PLIST="$HOME/Library/LaunchAgents/com.nightline.iphone-bridge-tunnel.plist"
+    cat > "$TUNNEL_PLIST" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.ngrok.iphone-bridge</string>
+    <string>com.nightline.iphone-bridge-tunnel</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/homebrew/bin/ngrok</string>
-        <string>http</string>
-        <string>8080</string>
-        <string>--log</string>
-        <string>stdout</string>
+        <string>/bin/bash</string>
+        <string>$TUNNEL_SCRIPT</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
-    <key>StandardOutPath</key>
-    <string>$LOG_DIR/ngrok.log</string>
-    <key>StandardErrorPath</key>
-    <string>$LOG_DIR/ngrok.log</string>
 </dict>
 </plist>
 EOF
-        
-        # Load ngrok service
-        launchctl unload "$NGROK_PLIST" 2>/dev/null || true
-        launchctl load "$NGROK_PLIST"
-        
-        echo -e "${GREEN}✓${NC} ngrok tunnel service installed"
-        
-        # Wait for ngrok to start and get URL
-        echo -e "${YELLOW}Waiting for ngrok tunnel...${NC}"
-        sleep 3
-        
-        NGROK_URL=$(curl -s http://localhost:4040/api/tunnels 2>/dev/null | python3 -c "import json,sys; data=json.load(sys.stdin); print(data['tunnels'][0]['public_url'] if data.get('tunnels') else '')" 2>/dev/null || echo "")
-        
-        if [[ -n "$NGROK_URL" ]]; then
-            echo ""
-            echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-            echo -e "${CYAN}║${NC}  ${GREEN}🌐 Your Bridge is Live!${NC}                                    ${CYAN}║${NC}"
-            echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
-            echo ""
-            echo -e "  Public URL: ${GREEN}$NGROK_URL${NC}"
-            echo ""
-            echo -e "  ${CYAN}Add this to your Nightline dashboard as the Bridge URL${NC}"
-            echo ""
-            echo -e "  Test it:    curl $NGROK_URL/health"
-            echo ""
-            echo -e "${YELLOW}⚠  Note: Free ngrok URLs change on restart.${NC}"
-            echo "   For a stable URL, upgrade ngrok or use Cloudflare Tunnel."
-            echo ""
-        else
-            echo -e "${YELLOW}Could not get ngrok URL automatically.${NC}"
-            echo "Check: curl http://localhost:4040/api/tunnels"
-            echo "Or view: open http://localhost:4040"
+    
+    launchctl unload "$TUNNEL_PLIST" 2>/dev/null || true
+    launchctl load "$TUNNEL_PLIST"
+    
+    echo -e "${GREEN}✓${NC} Tunnel service installed"
+    
+    # Wait for tunnel to establish and get URL
+    echo -e "${YELLOW}Waiting for tunnel (this may take 10-15 seconds)...${NC}"
+    
+    for i in {1..20}; do
+        sleep 1
+        if [[ -f /tmp/iphone-bridge-tunnel-url ]]; then
+            TUNNEL_URL=$(cat /tmp/iphone-bridge-tunnel-url)
+            break
         fi
+        # Also check the log directly
+        TUNNEL_URL=$(grep -oE 'https://[a-z0-9]+\.lhr\.life' "$LOG_DIR/tunnel.log" 2>/dev/null | tail -1)
+        if [[ -n "$TUNNEL_URL" ]]; then
+            break
+        fi
+    done
+    
+    if [[ -n "$TUNNEL_URL" ]]; then
+        echo ""
+        echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${CYAN}║${NC}  ${GREEN}🌐 Your Bridge is Live!${NC}                                    ${CYAN}║${NC}"
+        echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        echo -e "  Public URL: ${GREEN}$TUNNEL_URL${NC}"
+        echo ""
+        echo -e "  ${CYAN}Add this to your Nightline dashboard as the Bridge URL${NC}"
+        echo ""
+        echo -e "  Test it: curl $TUNNEL_URL/health"
+        echo ""
+        echo -e "${YELLOW}⚠  Note: URL changes on restart. For stable URL, use Cloudflare Tunnel.${NC}"
+        echo ""
+    else
+        echo -e "${YELLOW}Tunnel starting in background...${NC}"
+        echo ""
+        echo "  Check URL:  cat /tmp/iphone-bridge-tunnel-url"
+        echo "  View logs:  tail -f $LOG_DIR/tunnel.log"
+        echo ""
     fi
 else
     echo -e "${CYAN}Next Step: Expose your bridge to the internet${NC}"
     echo ""
-    echo "  Option 1 - ngrok (easiest):"
-    echo "    curl -fsSL https://tinyurl.com/288nshhu | bash -s -- --ngrok"
+    echo "  Quick tunnel (no signup, works instantly):"
+    echo "    curl -fsSL https://tinyurl.com/288nshhu | bash -s -- --tunnel"
     echo ""
-    echo "  Option 2 - Manual ngrok:"
-    echo "    brew install ngrok"
-    echo "    ngrok http 8080"
+    echo "  Or manually:"
+    echo "    ssh -R 80:localhost:8080 nokey@localhost.run"
     echo ""
-    echo "  Option 3 - Cloudflare Tunnel (production):"
+    echo "  For production (stable URL):"
     echo "    ~/iphone-bridge/scripts/setup-tunnel.sh"
     echo ""
 fi
