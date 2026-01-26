@@ -38,7 +38,28 @@ A Mac Mini server that bridges iMessage/SMS communication between an iPhone and 
 
 ## Quick Start
 
-### 1. Clone and Configure
+### One-Line Install (Recommended)
+
+```bash
+curl -fsSL https://install.nightline.ai/iphone-bridge | bash
+```
+
+Or with your client ID:
+
+```bash
+curl -fsSL https://install.nightline.ai/iphone-bridge | bash -s -- --client-id YOUR_CLIENT_ID
+```
+
+This will:
+
+- Install all dependencies (Python, Poetry)
+- Clone and configure the bridge
+- Generate a secure webhook secret
+- Install as a system service that starts on boot
+
+### Manual Installation
+
+#### 1. Clone and Configure
 
 ```bash
 # Clone the repository
@@ -236,6 +257,34 @@ Common issues:
 - Missing Full Disk Access permission
 - Port 8080 already in use
 
+## Management CLI
+
+After installation, use `bridge-ctl` to manage your bridge:
+
+```bash
+# Add to PATH (do once)
+export PATH="$HOME/iphone-bridge/scripts:$PATH"
+# Or symlink: ln -s ~/iphone-bridge/scripts/bridge-ctl /usr/local/bin/bridge-ctl
+
+# Check status
+bridge-ctl status
+
+# View logs
+bridge-ctl logs
+
+# Restart
+bridge-ctl restart
+
+# Edit configuration
+bridge-ctl config
+
+# Update to latest version
+bridge-ctl update
+
+# Set up remote access tunnels
+bridge-ctl tunnel
+```
+
 ## Network Setup
 
 The Nightline server needs to reach this bridge. Options:
@@ -245,7 +294,9 @@ The Nightline server needs to reach this bridge. Options:
 3. **Port forwarding**: Open port 8080 on your router (less secure)
 4. **Static IP**: If Mac Mini has a public IP
 
-Example Cloudflare Tunnel setup:
+See [Remote Access Guide](docs/REMOTE_ACCESS.md) for detailed setup instructions.
+
+### Quick Cloudflare Tunnel Setup
 
 ```bash
 # Install cloudflared

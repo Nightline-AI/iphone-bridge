@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.config import settings
-from app.imessage import IncomingMessage, iMessageSender, iMessageWatcher
+from app.imessage import IncomingMessage, iMessageSender, iMessageWatcher, MockiMessageWatcher, MockiMessageSender
 from app.webhooks import NightlineClient, SendMessageRequest, SendMessageResponse
 from app.services.queue import MessageQueue
 
@@ -55,9 +55,14 @@ async def _deliver_to_nightline(payload: dict) -> bool:
     if not _nightline_client:
         return False
     
+    client_id = settings.nightline_client_id
+    if not client_id:
+        logger.error("NIGHTLINE_CLIENT_ID not configured - cannot deliver message")
+        return False
+    
     try:
         client = await _nightline_client._get_client()
-        url = f"{_nightline_client.base_url}/api/webhooks/iphone-bridge/message"
+        url = f"{_nightline_client.base_url}/webhooks/iphone-bridge/{client_id}/message"
         response = await client.post(url, json=payload)
         return response.status_code == 200
     except Exception as e:
@@ -103,20 +108,31 @@ async def lifespan(app: FastAPI):
 
     # Startup
     _start_time = time.time()
-    logger.info("Starting iPhone Bridge...")
+    
+    if settings.mock_mode:
+        logger.info("🧪 Starting iPhone Bridge in MOCK MODE (no real iMessage)")
+    else:
+        logger.info("Starting iPhone Bridge...")
 
-    # Initialize components
-    _sender = iMessageSender()
+    # Initialize components based on mode
+    if settings.mock_mode:
+        _sender = MockiMessageSender()
+        _watcher = MockiMessageWatcher(
+            on_message=_handle_incoming_message,
+            poll_interval=settings.poll_interval,
+        )
+    else:
+        _sender = iMessageSender()
+        _watcher = iMessageWatcher(
+            on_message=_handle_incoming_message,
+            poll_interval=settings.poll_interval,
+        )
+    
     _nightline_client = NightlineClient()
     
     # Initialize message queue
     _message_queue = MessageQueue(deliver_fn=_deliver_to_nightline)
     await _message_queue.start()
-
-    _watcher = iMessageWatcher(
-        on_message=_handle_incoming_message,
-        poll_interval=settings.poll_interval,
-    )
 
     # Start the message watcher
     await _watcher.start(skip_historical=not settings.process_historical)
@@ -130,7 +146,8 @@ async def lifespan(app: FastAPI):
             "Messages will be queued until connection is restored."
         )
 
-    logger.info(f"iPhone Bridge started on {settings.host}:{settings.port}")
+    mode_str = "🧪 MOCK MODE" if settings.mock_mode else "PRODUCTION MODE"
+    logger.info(f"iPhone Bridge started on {settings.host}:{settings.port} ({mode_str})")
 
     yield
 
@@ -340,6 +357,582 @@ async def send_message(request: SendMessageRequest):
 async def detailed_status():
     """Detailed status for debugging (no auth required)."""
     return await health_check()
+
+
+# =====================================================
+# MOCK MODE TEST ENDPOINTS
+# Only available when MOCK_MODE=true
+# =====================================================
+
+
+class InjectMessageRequest(BaseModel):
+    """Request to inject a test message."""
+    phone: str
+    text: str
+    is_imessage: bool = True
+
+
+class InjectMessageResponse(BaseModel):
+    """Response after injecting a test message."""
+    success: bool
+    message_id: str | None = None
+    error: str | None = None
+
+
+@app.post("/test/inject", response_model=InjectMessageResponse)
+async def inject_test_message(request: InjectMessageRequest):
+    """
+    [MOCK MODE ONLY] Inject a test message as if received from a phone.
+    
+    This simulates receiving an iMessage/SMS so you can test the full flow
+    without a real iPhone connected.
+    """
+    if not settings.mock_mode:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint is only available in mock mode. Set MOCK_MODE=true",
+        )
+    
+    if not isinstance(_watcher, MockiMessageWatcher):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Mock watcher not initialized",
+        )
+    
+    try:
+        message = await _watcher.inject_message(
+            phone=request.phone,
+            text=request.text,
+            is_imessage=request.is_imessage,
+        )
+        return InjectMessageResponse(success=True, message_id=message.guid)
+    except Exception as e:
+        logger.error(f"Failed to inject message: {e}")
+        return InjectMessageResponse(success=False, error=str(e))
+
+
+@app.get("/test/sent")
+async def get_sent_messages():
+    """
+    [MOCK MODE ONLY] Get all messages that would have been sent via iMessage.
+    
+    Returns the list of messages that the mock sender has logged.
+    """
+    if not settings.mock_mode:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint is only available in mock mode. Set MOCK_MODE=true",
+        )
+    
+    if not isinstance(_sender, MockiMessageSender):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Mock sender not initialized",
+        )
+    
+    return {
+        "messages": _sender.get_sent_messages(),
+        "count": len(_sender.get_sent_messages()),
+    }
+
+
+@app.get("/test/received")
+async def get_received_messages():
+    """
+    [MOCK MODE ONLY] Get all messages that have been injected/received.
+    
+    Returns the list of messages that have been injected for testing.
+    """
+    if not settings.mock_mode:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint is only available in mock mode. Set MOCK_MODE=true",
+        )
+    
+    if not isinstance(_watcher, MockiMessageWatcher):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Mock watcher not initialized",
+        )
+    
+    messages = _watcher.get_message_history()
+    return {
+        "messages": [
+            {
+                "id": m.guid,
+                "phone": m.phone,
+                "text": m.text,
+                "received_at": m.received_at.isoformat(),
+                "is_imessage": m.is_imessage,
+            }
+            for m in messages
+        ],
+        "count": len(messages),
+    }
+
+
+@app.delete("/test/clear")
+async def clear_test_data():
+    """
+    [MOCK MODE ONLY] Clear all test message data.
+    """
+    if not settings.mock_mode:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint is only available in mock mode. Set MOCK_MODE=true",
+        )
+    
+    if isinstance(_sender, MockiMessageSender):
+        _sender.clear_sent_messages()
+    
+    return {"success": True, "message": "Test data cleared"}
+
+
+# Test UI - simple HTML interface for manual testing
+TEST_UI_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iPhone Bridge Test Console</title>
+    <style>
+        :root {
+            --bg: #0a0a0f;
+            --surface: #12121a;
+            --border: #2a2a3a;
+            --text: #e0e0e0;
+            --text-dim: #808090;
+            --accent: #00d4aa;
+            --accent-dim: #00a080;
+            --sent: #3b82f6;
+            --received: #10b981;
+            --error: #ef4444;
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--accent);
+        }
+        
+        .badge {
+            background: var(--accent);
+            color: var(--bg);
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+        }
+        
+        @media (max-width: 900px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+        
+        .panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .panel-header {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-dim);
+        }
+        
+        .panel-body {
+            padding: 1rem;
+        }
+        
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        
+        label {
+            display: block;
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        input, textarea {
+            width: 100%;
+            padding: 0.75rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text);
+            font-family: inherit;
+            font-size: 0.875rem;
+        }
+        
+        input:focus, textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+        
+        button {
+            background: var(--accent);
+            color: var(--bg);
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        button:hover {
+            background: var(--accent-dim);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .messages {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .message {
+            padding: 0.75rem;
+            border-radius: 4px;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+        }
+        
+        .message.sent {
+            background: rgba(59, 130, 246, 0.15);
+            border-left: 3px solid var(--sent);
+        }
+        
+        .message.received {
+            background: rgba(16, 185, 129, 0.15);
+            border-left: 3px solid var(--received);
+        }
+        
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            margin-bottom: 0.5rem;
+        }
+        
+        .message-text {
+            word-break: break-word;
+        }
+        
+        .empty {
+            color: var(--text-dim);
+            font-style: italic;
+            text-align: center;
+            padding: 2rem;
+        }
+        
+        .status {
+            display: flex;
+            gap: 1rem;
+            padding: 1rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            font-size: 0.875rem;
+        }
+        
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--received);
+        }
+        
+        .status-dot.error {
+            background: var(--error);
+        }
+        
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            padding: 1rem 1.5rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            animation: slideIn 0.3s ease;
+        }
+        
+        .toast.success { border-color: var(--received); }
+        .toast.error { border-color: var(--error); }
+        
+        @keyframes slideIn {
+            from { transform: translateY(1rem); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📱 iPhone Bridge</h1>
+            <span class="badge">Mock Mode</span>
+        </header>
+        
+        <div class="status" id="status">
+            <div class="status-item">
+                <span class="status-dot" id="status-dot"></span>
+                <span id="status-text">Checking...</span>
+            </div>
+            <div class="status-item" id="nightline-status"></div>
+        </div>
+        
+        <div class="grid">
+            <div class="panel">
+                <div class="panel-header">📥 Inject Incoming Message</div>
+                <div class="panel-body">
+                    <form id="inject-form">
+                        <div class="form-group">
+                            <label for="phone">Phone Number</label>
+                            <input type="text" id="phone" placeholder="+15551234567" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="text">Message Text</label>
+                            <textarea id="text" placeholder="Enter test message..." required></textarea>
+                        </div>
+                        <button type="submit">Send Test Message →</button>
+                    </form>
+                </div>
+            </div>
+            
+            <div class="panel">
+                <div class="panel-header">📤 Outgoing Messages (Mock)</div>
+                <div class="panel-body">
+                    <div class="messages" id="sent-messages">
+                        <div class="empty">No messages sent yet</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="panel" style="grid-column: 1 / -1;">
+                <div class="panel-header">📋 Message Log</div>
+                <div class="panel-body">
+                    <div class="messages" id="all-messages">
+                        <div class="empty">No messages yet</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const API_BASE = window.location.origin;
+        
+        // Show toast notification
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+        
+        // Check health status
+        async function checkStatus() {
+            try {
+                const res = await fetch(`${API_BASE}/health`);
+                const data = await res.json();
+                
+                document.getElementById('status-dot').className = 
+                    data.status === 'healthy' ? 'status-dot' : 'status-dot error';
+                document.getElementById('status-text').textContent = 
+                    `Bridge: ${data.status}`;
+                document.getElementById('nightline-status').innerHTML = `
+                    <span class="status-dot ${data.nightline.connected ? '' : 'error'}"></span>
+                    <span>Nightline: ${data.nightline.connected ? 'Connected' : 'Disconnected'}</span>
+                `;
+            } catch (e) {
+                document.getElementById('status-dot').className = 'status-dot error';
+                document.getElementById('status-text').textContent = 'Bridge: Offline';
+            }
+        }
+        
+        // Load sent messages
+        async function loadSentMessages() {
+            try {
+                const res = await fetch(`${API_BASE}/test/sent`);
+                const data = await res.json();
+                
+                const container = document.getElementById('sent-messages');
+                if (data.messages.length === 0) {
+                    container.innerHTML = '<div class="empty">No messages sent yet</div>';
+                    return;
+                }
+                
+                container.innerHTML = data.messages.map(m => `
+                    <div class="message sent">
+                        <div class="message-header">
+                            <span>→ ${m.phone}</span>
+                            <span>${new Date(m.sent_at).toLocaleTimeString()}</span>
+                        </div>
+                        <div class="message-text">${escapeHtml(m.text)}</div>
+                    </div>
+                `).reverse().join('');
+            } catch (e) {
+                console.error('Failed to load sent messages:', e);
+            }
+        }
+        
+        // Load received/injected messages
+        async function loadReceivedMessages() {
+            try {
+                const res = await fetch(`${API_BASE}/test/received`);
+                const data = await res.json();
+                
+                const container = document.getElementById('all-messages');
+                if (data.messages.length === 0) {
+                    container.innerHTML = '<div class="empty">No messages yet</div>';
+                    return;
+                }
+                
+                container.innerHTML = data.messages.map(m => `
+                    <div class="message received">
+                        <div class="message-header">
+                            <span>← ${m.phone}</span>
+                            <span>${new Date(m.received_at).toLocaleTimeString()}</span>
+                        </div>
+                        <div class="message-text">${escapeHtml(m.text)}</div>
+                    </div>
+                `).reverse().join('');
+            } catch (e) {
+                console.error('Failed to load received messages:', e);
+            }
+        }
+        
+        // Escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Handle form submission
+        document.getElementById('inject-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const phone = document.getElementById('phone').value;
+            const text = document.getElementById('text').value;
+            
+            try {
+                const res = await fetch(`${API_BASE}/test/inject`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone, text, is_imessage: true })
+                });
+                
+                const data = await res.json();
+                
+                if (data.success) {
+                    showToast('Message injected! Check server logs for flow.');
+                    document.getElementById('text').value = '';
+                    loadReceivedMessages();
+                    // Also reload sent in case server responded
+                    setTimeout(loadSentMessages, 1000);
+                } else {
+                    showToast(data.error || 'Failed to inject message', 'error');
+                }
+            } catch (e) {
+                showToast('Failed to inject message', 'error');
+            }
+        });
+        
+        // Initial load
+        checkStatus();
+        loadSentMessages();
+        loadReceivedMessages();
+        
+        // Poll for updates
+        setInterval(() => {
+            loadSentMessages();
+            loadReceivedMessages();
+        }, 3000);
+        
+        setInterval(checkStatus, 10000);
+    </script>
+</body>
+</html>
+"""
+
+from fastapi.responses import HTMLResponse
+
+@app.get("/test", response_class=HTMLResponse)
+async def test_ui():
+    """
+    [MOCK MODE ONLY] Simple web UI for testing the bridge.
+    
+    Open http://localhost:8080/test in your browser.
+    """
+    if not settings.mock_mode:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Test UI is only available in mock mode. Set MOCK_MODE=true",
+        )
+    
+    return TEST_UI_HTML
 
 
 if __name__ == "__main__":

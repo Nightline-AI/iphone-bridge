@@ -80,7 +80,7 @@ class NightlineClient:
             logger.error("NIGHTLINE_CLIENT_ID not configured - cannot forward message")
             return False
         
-        url = f"{self.base_url}/api/webhooks/iphone-bridge/{client_id}/message"
+        url = f"{self.base_url}/webhooks/iphone-bridge/{client_id}/message"
 
         try:
             client = await self._get_client()
@@ -116,7 +116,7 @@ class NightlineClient:
         Returns:
             True if server responds, False otherwise
         """
-        url = f"{self.base_url}/api/bridge/health"
+        url = f"{self.base_url}/webhooks/iphone-bridge/{settings.nightline_client_id}/health"
 
         try:
             client = await self._get_client()

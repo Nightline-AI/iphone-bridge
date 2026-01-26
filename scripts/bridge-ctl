@@ -1,0 +1,261 @@
+#!/bin/bash
+# iPhone Bridge Control Script
+# Manage your iPhone Bridge installation
+
+set -e
+
+INSTALL_DIR="${IPHONE_BRIDGE_DIR:-$HOME/iphone-bridge}"
+LOG_DIR="/var/log/iphone-bridge"
+PLIST_NAME="com.nightline.iphone-bridge.plist"
+PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+DIM='\033[2m'
+NC='\033[0m'
+
+cmd_help() {
+    echo -e "${CYAN}iPhone Bridge Control${NC}"
+    echo ""
+    echo "Usage: bridge-ctl <command>"
+    echo ""
+    echo "Commands:"
+    echo "  status      Show bridge status and health"
+    echo "  start       Start the bridge service"
+    echo "  stop        Stop the bridge service"
+    echo "  restart     Restart the bridge service"
+    echo "  logs        Tail the bridge logs"
+    echo "  config      Edit configuration"
+    echo "  update      Update to latest version"
+    echo "  uninstall   Remove the bridge"
+    echo "  tunnel      Set up Cloudflare/Tailscale tunnel"
+    echo "  register    Register this bridge with Nightline"
+    echo ""
+}
+
+cmd_status() {
+    echo -e "${CYAN}iPhone Bridge Status${NC}"
+    echo ""
+    
+    # Check if service is loaded
+    if launchctl list | grep -q "com.nightline.iphone-bridge"; then
+        echo -e "Service:    ${GREEN}Running${NC}"
+    else
+        echo -e "Service:    ${RED}Stopped${NC}"
+    fi
+    
+    # Try health endpoint
+    HEALTH=$(curl -s http://localhost:8080/health 2>/dev/null || echo '{"status":"unreachable"}')
+    STATUS=$(echo "$HEALTH" | python3 -c "import json,sys; print(json.load(sys.stdin).get('status','error'))" 2>/dev/null || echo "error")
+    
+    case "$STATUS" in
+        healthy)
+            echo -e "Health:     ${GREEN}Healthy${NC}"
+            ;;
+        degraded)
+            echo -e "Health:     ${YELLOW}Degraded${NC}"
+            ;;
+        *)
+            echo -e "Health:     ${RED}$STATUS${NC}"
+            ;;
+    esac
+    
+    # Show more details if available
+    if [[ "$STATUS" != "error" && "$STATUS" != "unreachable" ]]; then
+        UPTIME=$(echo "$HEALTH" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'{int(d.get(\"uptime_seconds\",0)/3600)}h {int(d.get(\"uptime_seconds\",0)%3600/60)}m')" 2>/dev/null)
+        RECEIVED=$(echo "$HEALTH" | python3 -c "import json,sys; print(json.load(sys.stdin).get('stats',{}).get('messages_received',0))" 2>/dev/null)
+        SENT=$(echo "$HEALTH" | python3 -c "import json,sys; print(json.load(sys.stdin).get('stats',{}).get('messages_sent',0))" 2>/dev/null)
+        NIGHTLINE=$(echo "$HEALTH" | python3 -c "import json,sys; print('Connected' if json.load(sys.stdin).get('nightline',{}).get('connected') else 'Disconnected')" 2>/dev/null)
+        
+        echo ""
+        echo -e "Uptime:     $UPTIME"
+        echo -e "Nightline:  $NIGHTLINE"
+        echo -e "Received:   $RECEIVED messages"
+        echo -e "Sent:       $SENT messages"
+    fi
+    
+    echo ""
+    echo -e "${DIM}Full details: curl http://localhost:8080/health | jq${NC}"
+}
+
+cmd_start() {
+    echo -e "${YELLOW}Starting iPhone Bridge...${NC}"
+    launchctl load "$PLIST_PATH" 2>/dev/null || launchctl kickstart "gui/$(id -u)/com.nightline.iphone-bridge"
+    sleep 2
+    cmd_status
+}
+
+cmd_stop() {
+    echo -e "${YELLOW}Stopping iPhone Bridge...${NC}"
+    launchctl unload "$PLIST_PATH" 2>/dev/null || launchctl kill SIGTERM "gui/$(id -u)/com.nightline.iphone-bridge"
+    echo -e "${GREEN}Stopped${NC}"
+}
+
+cmd_restart() {
+    echo -e "${YELLOW}Restarting iPhone Bridge...${NC}"
+    launchctl kickstart -k "gui/$(id -u)/com.nightline.iphone-bridge" 2>/dev/null || {
+        cmd_stop
+        sleep 1
+        cmd_start
+    }
+    sleep 2
+    cmd_status
+}
+
+cmd_logs() {
+    LOG_FILE="${1:-stderr}"
+    echo -e "${CYAN}Tailing $LOG_FILE.log (Ctrl+C to exit)${NC}"
+    echo ""
+    tail -f "$LOG_DIR/$LOG_FILE.log"
+}
+
+cmd_config() {
+    if [[ -n "$EDITOR" ]]; then
+        $EDITOR "$INSTALL_DIR/.env"
+    elif command -v nano &>/dev/null; then
+        nano "$INSTALL_DIR/.env"
+    else
+        vim "$INSTALL_DIR/.env"
+    fi
+    
+    echo -e "${YELLOW}Config updated. Restart to apply changes:${NC}"
+    echo "  bridge-ctl restart"
+}
+
+cmd_update() {
+    echo -e "${YELLOW}Updating iPhone Bridge...${NC}"
+    
+    cd "$INSTALL_DIR"
+    git pull origin main 2>/dev/null || git pull origin master
+    poetry install --no-interaction
+    
+    echo -e "${GREEN}Updated!${NC}"
+    echo ""
+    echo "Restart to apply: bridge-ctl restart"
+}
+
+cmd_uninstall() {
+    echo -e "${RED}This will completely remove iPhone Bridge.${NC}"
+    read -p "Are you sure? (y/N) " -n 1 -r
+    echo
+    
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo -e "${YELLOW}Uninstalling...${NC}"
+        
+        # Stop service
+        launchctl unload "$PLIST_PATH" 2>/dev/null || true
+        
+        # Remove launchd plist
+        rm -f "$PLIST_PATH"
+        
+        # Remove install dir (but keep .env backup)
+        if [[ -f "$INSTALL_DIR/.env" ]]; then
+            cp "$INSTALL_DIR/.env" "$HOME/.iphone-bridge-env.backup"
+            echo -e "${DIM}Config backed up to ~/.iphone-bridge-env.backup${NC}"
+        fi
+        rm -rf "$INSTALL_DIR"
+        
+        echo -e "${GREEN}Uninstalled.${NC}"
+    else
+        echo "Cancelled."
+    fi
+}
+
+cmd_tunnel() {
+    echo -e "${CYAN}Tunnel Setup${NC}"
+    echo ""
+    echo "Choose a tunneling solution:"
+    echo ""
+    echo "  1) Tailscale (recommended for remote access)"
+    echo "     - Creates VPN mesh between all your devices"
+    echo "     - Zero config, works through NAT/firewalls"
+    echo "     - Free for personal use"
+    echo ""
+    echo "  2) Cloudflare Tunnel (recommended for exposing to Nightline)"
+    echo "     - Zero-trust access without opening ports"
+    echo "     - Free tier available"
+    echo ""
+    
+    read -p "Choose (1/2): " -n 1 -r
+    echo
+    
+    case $REPLY in
+        1)
+            echo -e "${YELLOW}Installing Tailscale...${NC}"
+            if ! command -v tailscale &>/dev/null; then
+                brew install tailscale
+            fi
+            echo ""
+            echo "Run: tailscale up"
+            echo "Then access your bridge from any Tailscale-connected device at:"
+            echo "  http://$(hostname):8080"
+            ;;
+        2)
+            echo -e "${YELLOW}Installing Cloudflare Tunnel...${NC}"
+            if ! command -v cloudflared &>/dev/null; then
+                brew install cloudflared
+            fi
+            echo ""
+            echo "Steps:"
+            echo "  1. cloudflared tunnel login"
+            echo "  2. cloudflared tunnel create iphone-bridge"
+            echo "  3. cloudflared tunnel route dns iphone-bridge bridge-CLIENTID.nightline.ai"
+            echo "  4. cloudflared tunnel run --url http://localhost:8080 iphone-bridge"
+            ;;
+    esac
+}
+
+cmd_register() {
+    echo -e "${CYAN}Register Bridge with Nightline${NC}"
+    echo ""
+    
+    # Read current config
+    if [[ -f "$INSTALL_DIR/.env" ]]; then
+        source "$INSTALL_DIR/.env" 2>/dev/null || true
+    fi
+    
+    if [[ -z "$NIGHTLINE_CLIENT_ID" ]]; then
+        echo "Enter your Nightline Client ID:"
+        read CLIENT_ID
+        
+        # Update .env
+        if grep -q "NIGHTLINE_CLIENT_ID=" "$INSTALL_DIR/.env"; then
+            sed -i '' "s/NIGHTLINE_CLIENT_ID=.*/NIGHTLINE_CLIENT_ID=$CLIENT_ID/" "$INSTALL_DIR/.env"
+        else
+            echo "NIGHTLINE_CLIENT_ID=$CLIENT_ID" >> "$INSTALL_DIR/.env"
+        fi
+        echo -e "${GREEN}Client ID saved.${NC}"
+    else
+        echo "Client ID: $NIGHTLINE_CLIENT_ID"
+    fi
+    
+    echo ""
+    echo "Your webhook secret:"
+    echo -e "${GREEN}$WEBHOOK_SECRET${NC}"
+    echo ""
+    echo "Add this to your Nightline dashboard to complete setup."
+}
+
+# Main
+case "${1:-help}" in
+    status)   cmd_status ;;
+    start)    cmd_start ;;
+    stop)     cmd_stop ;;
+    restart)  cmd_restart ;;
+    logs)     cmd_logs "$2" ;;
+    config)   cmd_config ;;
+    update)   cmd_update ;;
+    uninstall) cmd_uninstall ;;
+    tunnel)   cmd_tunnel ;;
+    register) cmd_register ;;
+    help|--help|-h) cmd_help ;;
+    *)
+        echo -e "${RED}Unknown command: $1${NC}"
+        echo ""
+        cmd_help
+        exit 1
+        ;;
+esac
