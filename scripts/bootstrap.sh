@@ -162,11 +162,25 @@ fi
 echo -e "${YELLOW}Installing dependencies...${NC}"
 
 # Fix for Homebrew Python venv issue on macOS
-export PYTHON_VENV_USE_SYMLINKS=1
-poetry config virtualenvs.options.always-copy true 2>/dev/null || true
+# Create venv manually with --copies to avoid symlink issues
+VENV_DIR="$INSTALL_DIR/.venv"
+if [[ ! -d "$VENV_DIR" ]]; then
+    echo -e "${DIM}Creating virtual environment...${NC}"
+    python3 -m venv --copies "$VENV_DIR" || {
+        # Fallback: try without --copies
+        python3 -m venv "$VENV_DIR"
+    }
+fi
 
+# Tell Poetry to use the existing venv
+export POETRY_VIRTUALENVS_IN_PROJECT=true
+export POETRY_VIRTUALENVS_CREATE=false
+
+# Activate and install
+source "$VENV_DIR/bin/activate"
 poetry install --no-interaction
-POETRY_PYTHON=$(poetry env info --path)/bin/python
+
+POETRY_PYTHON="$VENV_DIR/bin/python"
 echo -e "${GREEN}✓${NC} Dependencies installed"
 
 # ===== Generate Configuration =====
