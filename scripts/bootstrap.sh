@@ -45,17 +45,27 @@ while [[ $# -gt 0 ]]; do
             SKIP_SERVICE=true
             shift
             ;;
+        --ngrok)
+            SETUP_NGROK=true
+            shift
+            ;;
+        --ngrok-token)
+            NGROK_TOKEN="$2"
+            shift 2
+            ;;
         --help)
             echo "iPhone Bridge Installer"
             echo ""
-            echo "Usage: curl -fsSL https://install.nightline.ai/iphone-bridge | bash -s -- [OPTIONS]"
+            echo "Usage: curl -fsSL https://tinyurl.com/288nshhu | bash -s -- [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --client-id ID    Your Nightline client ID (can be set later in .env)"
-            echo "  --secret SECRET   Webhook secret (auto-generated if not provided)"
-            echo "  --server-url URL  Nightline server URL (default: $NIGHTLINE_API)"
-            echo "  --no-service      Don't install as system service"
-            echo "  --help            Show this help message"
+            echo "  --client-id ID      Your Nightline client ID (can be set later in .env)"
+            echo "  --secret SECRET     Webhook secret (auto-generated if not provided)"
+            echo "  --server-url URL    Nightline server URL (default: $NIGHTLINE_API)"
+            echo "  --no-service        Don't install as system service"
+            echo "  --ngrok             Set up ngrok tunnel for public URL"
+            echo "  --ngrok-token TOKEN Your ngrok auth token (get from ngrok.com)"
+            echo "  --help              Show this help message"
             exit 0
             ;;
         *)
@@ -318,3 +328,114 @@ echo ""
 echo -e "${CYAN}Webhook Secret (save this for Nightline dashboard):${NC}"
 echo -e "${GREEN}$WEBHOOK_SECRET${NC}"
 echo ""
+
+# ===== ngrok Setup (Optional) =====
+
+if [[ "$SETUP_NGROK" == "true" ]]; then
+    echo ""
+    echo -e "${CYAN}Setting up ngrok tunnel...${NC}"
+    
+    # Install ngrok
+    if ! command -v ngrok &>/dev/null; then
+        echo -e "${YELLOW}Installing ngrok...${NC}"
+        brew install ngrok
+    fi
+    echo -e "${GREEN}✓${NC} ngrok installed"
+    
+    # Configure ngrok auth token
+    if [[ -n "$NGROK_TOKEN" ]]; then
+        ngrok config add-authtoken "$NGROK_TOKEN"
+        echo -e "${GREEN}✓${NC} ngrok authenticated"
+    elif [[ ! -f "$HOME/.config/ngrok/ngrok.yml" ]] && [[ ! -f "$HOME/Library/Application Support/ngrok/ngrok.yml" ]]; then
+        echo ""
+        echo -e "${YELLOW}ngrok requires authentication.${NC}"
+        echo "Get your free auth token at: https://dashboard.ngrok.com/get-started/your-authtoken"
+        echo ""
+        read -p "Enter your ngrok auth token (or press Enter to skip): " NGROK_TOKEN
+        if [[ -n "$NGROK_TOKEN" ]]; then
+            ngrok config add-authtoken "$NGROK_TOKEN"
+            echo -e "${GREEN}✓${NC} ngrok authenticated"
+        else
+            echo -e "${YELLOW}Skipping ngrok setup. Run manually later: ngrok http 8080${NC}"
+            SETUP_NGROK=false
+        fi
+    fi
+    
+    if [[ "$SETUP_NGROK" == "true" ]]; then
+        # Create ngrok launchd plist
+        NGROK_PLIST="$HOME/Library/LaunchAgents/com.ngrok.iphone-bridge.plist"
+        
+        cat > "$NGROK_PLIST" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ngrok.iphone-bridge</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/ngrok</string>
+        <string>http</string>
+        <string>8080</string>
+        <string>--log</string>
+        <string>stdout</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>$LOG_DIR/ngrok.log</string>
+    <key>StandardErrorPath</key>
+    <string>$LOG_DIR/ngrok.log</string>
+</dict>
+</plist>
+EOF
+        
+        # Load ngrok service
+        launchctl unload "$NGROK_PLIST" 2>/dev/null || true
+        launchctl load "$NGROK_PLIST"
+        
+        echo -e "${GREEN}✓${NC} ngrok tunnel service installed"
+        
+        # Wait for ngrok to start and get URL
+        echo -e "${YELLOW}Waiting for ngrok tunnel...${NC}"
+        sleep 3
+        
+        NGROK_URL=$(curl -s http://localhost:4040/api/tunnels 2>/dev/null | python3 -c "import json,sys; data=json.load(sys.stdin); print(data['tunnels'][0]['public_url'] if data.get('tunnels') else '')" 2>/dev/null || echo "")
+        
+        if [[ -n "$NGROK_URL" ]]; then
+            echo ""
+            echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${CYAN}║${NC}  ${GREEN}🌐 Your Bridge is Live!${NC}                                    ${CYAN}║${NC}"
+            echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
+            echo ""
+            echo -e "  Public URL: ${GREEN}$NGROK_URL${NC}"
+            echo ""
+            echo -e "  ${CYAN}Add this to your Nightline dashboard as the Bridge URL${NC}"
+            echo ""
+            echo -e "  Test it:    curl $NGROK_URL/health"
+            echo ""
+            echo -e "${YELLOW}⚠  Note: Free ngrok URLs change on restart.${NC}"
+            echo "   For a stable URL, upgrade ngrok or use Cloudflare Tunnel."
+            echo ""
+        else
+            echo -e "${YELLOW}Could not get ngrok URL automatically.${NC}"
+            echo "Check: curl http://localhost:4040/api/tunnels"
+            echo "Or view: open http://localhost:4040"
+        fi
+    fi
+else
+    echo -e "${CYAN}Next Step: Expose your bridge to the internet${NC}"
+    echo ""
+    echo "  Option 1 - ngrok (easiest):"
+    echo "    curl -fsSL https://tinyurl.com/288nshhu | bash -s -- --ngrok"
+    echo ""
+    echo "  Option 2 - Manual ngrok:"
+    echo "    brew install ngrok"
+    echo "    ngrok http 8080"
+    echo ""
+    echo "  Option 3 - Cloudflare Tunnel (production):"
+    echo "    ~/iphone-bridge/scripts/setup-tunnel.sh"
+    echo ""
+fi
