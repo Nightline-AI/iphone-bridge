@@ -303,6 +303,48 @@ EOF
     else
         echo -e "${YELLOW}⚠${NC} Service may not have started"
     fi
+    
+    # ===== Install Auto-Updater =====
+    
+    echo -e "${YELLOW}Installing auto-updater...${NC}"
+    
+    chmod +x "$INSTALL_DIR/scripts/auto-update.sh"
+    
+    UPDATER_PLIST="com.nightline.iphone-bridge-updater.plist"
+    cat > "$LAUNCH_AGENTS_DIR/$UPDATER_PLIST" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nightline.iphone-bridge-updater</string>
+    
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$INSTALL_DIR/scripts/auto-update.sh</string>
+    </array>
+    
+    <!-- Check for updates every 5 minutes -->
+    <key>StartInterval</key>
+    <integer>300</integer>
+    
+    <key>RunAtLoad</key>
+    <true/>
+    
+    <key>StandardOutPath</key>
+    <string>$LOG_DIR/updater.log</string>
+    
+    <key>StandardErrorPath</key>
+    <string>$LOG_DIR/updater.log</string>
+</dict>
+</plist>
+EOF
+    
+    launchctl unload "$LAUNCH_AGENTS_DIR/$UPDATER_PLIST" 2>/dev/null || true
+    launchctl load "$LAUNCH_AGENTS_DIR/$UPDATER_PLIST"
+    
+    echo -e "${GREEN}✓${NC} Auto-updater installed (checks every 5 min)"
 fi
 
 # ===== Final Instructions =====
