@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from management.config import settings
 from management.auth import verify_token, require_auth
-from management.routes import services, config, logs, health
+from management.routes import services, config, logs, health, update
 
 # Configure logging
 logging.basicConfig(
@@ -41,6 +41,7 @@ app.include_router(health.router)
 app.include_router(services.router)
 app.include_router(config.router)
 app.include_router(logs.router)
+app.include_router(update.router)
 
 
 # ============================================================
@@ -518,6 +519,55 @@ DASHBOARD_HTML = """
             from { transform: translateY(0.5rem); opacity: 0; }
             to { transform: translateY(0); opacity: 1; }
         }
+        
+        .health-bar {
+            display: flex;
+            gap: 1.5rem;
+            padding: 1rem 1.25rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+        
+        .health-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+        }
+        
+        .queue-badge {
+            background: var(--surface-2);
+            padding: 0.125rem 0.5rem;
+            border-radius: 4px;
+            font-family: 'SF Mono', monospace;
+            font-size: 0.75rem;
+        }
+        
+        .queue-badge.warning {
+            background: rgba(234, 179, 8, 0.2);
+            color: var(--yellow);
+        }
+        
+        .update-section {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-top: 0.75rem;
+            border-top: 1px solid var(--border);
+        }
+        
+        .update-info {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        
+        .update-available {
+            color: var(--yellow);
+        }
     </style>
 </head>
 <body>
@@ -525,13 +575,33 @@ DASHBOARD_HTML = """
         <header>
             <h1>📱 iPhone Bridge</h1>
             <div class="header-right">
-                <div class="status-badge">
-                    <span class="status-dot" id="status-dot"></span>
-                    <span id="status-text">Checking...</span>
-                </div>
                 <a href="/logout" class="logout-btn">Logout</a>
             </div>
         </header>
+        
+        <!-- Health Status Bar -->
+        <div class="health-bar" id="health-bar">
+            <div class="health-item">
+                <span class="status-dot" id="h-bridge"></span>
+                <span>Bridge</span>
+            </div>
+            <div class="health-item">
+                <span class="status-dot" id="h-nightline"></span>
+                <span>Nightline</span>
+            </div>
+            <div class="health-item">
+                <span class="status-dot" id="h-chatdb"></span>
+                <span>Chat.db</span>
+            </div>
+            <div class="health-item">
+                <span class="status-dot" id="h-tunnel"></span>
+                <span>Tunnel</span>
+            </div>
+            <div class="health-item" id="queue-info">
+                <span class="queue-badge">0</span>
+                <span>Queued</span>
+            </div>
+        </div>
         
         <div class="grid">
             <div class="card">
@@ -574,12 +644,19 @@ DASHBOARD_HTML = """
             </div>
             
             <div class="card">
-                <div class="card-header">Quick Actions</div>
+                <div class="card-header">Actions</div>
                 <div class="card-body">
-                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;">
                         <button class="btn" onclick="restartService('bridge')">Restart Bridge</button>
-                        <button class="btn" onclick="restartService('tunnel')">Restart Tunnel</button>
-                        <button class="btn" onclick="checkBridgeHealth()">Health Check</button>
+                        <button class="btn" onclick="restartService('tunnel-bridge')">Restart Tunnel</button>
+                    </div>
+                    <div class="update-section">
+                        <div class="update-info" id="update-info">
+                            <span class="mono" id="current-version">...</span>
+                        </div>
+                        <button class="btn btn-primary" id="update-btn" onclick="performUpdate()">
+                            Check for Updates
+                        </button>
                     </div>
                 </div>
             </div>
@@ -613,18 +690,40 @@ DASHBOARD_HTML = """
                 const res = await fetch('/health', { credentials: 'same-origin' });
                 const data = await res.json();
                 
-                const dot = document.getElementById('status-dot');
-                const text = document.getElementById('status-text');
+                // Update health bar indicators
+                const setHealth = (id, ok) => {
+                    const el = document.getElementById(id);
+                    el.className = 'status-dot' + (ok ? '' : ' offline');
+                };
                 
-                dot.className = 'status-dot';
-                if (data.status === 'unhealthy') dot.classList.add('offline');
-                else if (data.status === 'degraded') dot.classList.add('degraded');
+                // Bridge service running
+                setHealth('h-bridge', data.services?.bridge);
                 
-                text.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+                // Nightline connection
+                const nightlineOk = data.bridge_health?.nightline?.connected;
+                setHealth('h-nightline', nightlineOk);
                 
-                // Update services
+                // Chat.db access  
+                const chatDbOk = data.bridge_health?.watcher?.chat_db_accessible;
+                setHealth('h-chatdb', chatDbOk);
+                
+                // Tunnel running
+                setHealth('h-tunnel', data.services?.['tunnel-bridge']);
+                
+                // Queue size
+                const queueSize = data.bridge_health?.queue?.size || 0;
+                const queueBadge = document.querySelector('.queue-badge');
+                queueBadge.textContent = queueSize;
+                queueBadge.className = 'queue-badge' + (queueSize > 10 ? ' warning' : '');
+                
+                // Update services list
                 const svcContainer = document.getElementById('services');
-                const svcNames = { bridge: 'Bridge Server', tunnel: 'Cloudflare Tunnel', updater: 'Auto Updater' };
+                const svcNames = { 
+                    bridge: 'Bridge Server', 
+                    'tunnel-bridge': 'Bridge Tunnel',
+                    'tunnel-manage': 'Management Tunnel',
+                    updater: 'Auto Updater' 
+                };
                 
                 svcContainer.innerHTML = Object.entries(data.services)
                     .filter(([k]) => k !== 'management')
@@ -682,6 +781,52 @@ DASHBOARD_HTML = """
                 showToast(`Bridge: ${data.status}`, data.status === 'healthy' ? 'success' : 'error');
             } catch (e) {
                 showToast('Bridge unreachable', 'error');
+            }
+        }
+        
+        async function checkForUpdates() {
+            try {
+                const res = await fetch('/api/update', { credentials: 'same-origin' });
+                const data = await res.json();
+                
+                const info = document.getElementById('update-info');
+                const btn = document.getElementById('update-btn');
+                
+                if (data.has_updates) {
+                    info.innerHTML = `<span class="update-available">Update available: ${data.current_commit} → ${data.remote_commit}</span>`;
+                    btn.textContent = 'Update Now';
+                    btn.onclick = performUpdate;
+                } else {
+                    info.innerHTML = `<span class="mono">${data.current_commit}</span> (${data.current_branch})`;
+                    btn.textContent = 'Check for Updates';
+                    btn.onclick = checkForUpdates;
+                }
+            } catch (e) {
+                console.error('Update check failed:', e);
+            }
+        }
+        
+        async function performUpdate() {
+            const btn = document.getElementById('update-btn');
+            btn.disabled = true;
+            btn.textContent = 'Updating...';
+            
+            try {
+                const res = await fetch('/api/update', { method: 'POST', credentials: 'same-origin' });
+                const data = await res.json();
+                
+                if (data.success) {
+                    showToast('Updating... page will reload', 'success');
+                    setTimeout(() => window.location.reload(), 5000);
+                } else {
+                    showToast('Update failed', 'error');
+                    btn.disabled = false;
+                    btn.textContent = 'Retry Update';
+                }
+            } catch (e) {
+                showToast('Update failed', 'error');
+                btn.disabled = false;
+                btn.textContent = 'Retry Update';
             }
         }
         
@@ -767,6 +912,7 @@ DASHBOARD_HTML = """
         // Init
         loadStatus();
         loadConfig();
+        checkForUpdates();
         connectLogs(currentLog);
         setInterval(loadStatus, 10000);
     </script>
