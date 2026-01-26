@@ -86,10 +86,17 @@ async def stream_logs(websocket: WebSocket, log_name: str, token: str | None = N
     """
     Stream logs via WebSocket.
     
-    Connect with: ws://host/api/logs/ws/bridge?token=YOUR_TOKEN
+    Auth via query param OR cookie (cookie is httponly so JS can't read it,
+    but WebSocket connections send cookies automatically).
     """
-    # Verify token from query param
-    if not token or not verify_token(token):
+    # Try token from query param first, then cookie
+    session_token = token
+    if not session_token:
+        # WebSocket connections include cookies - extract from headers
+        cookies = websocket.cookies
+        session_token = cookies.get("mgmt_session")
+    
+    if not session_token or not verify_token(session_token):
         await websocket.close(code=4001, reason="Unauthorized")
         return
     

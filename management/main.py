@@ -602,18 +602,15 @@ DASHBOARD_HTML = """
     </div>
     
     <script>
-        const TOKEN = document.cookie.split('; ')
-            .find(row => row.startsWith('mgmt_session='))
-            ?.split('=')[1];
-        
-        const headers = { 'Authorization': `Bearer ${TOKEN}` };
+        // Auth is handled via httponly cookie - sent automatically with requests
+        const headers = {};
         
         let currentLog = 'bridge';
         let logWs = null;
         
         async function loadStatus() {
             try {
-                const res = await fetch('/health');
+                const res = await fetch('/health', { credentials: 'same-origin' });
                 const data = await res.json();
                 
                 const dot = document.getElementById('status-dot');
@@ -651,7 +648,7 @@ DASHBOARD_HTML = """
         
         async function loadConfig() {
             try {
-                const res = await fetch('/api/config', { headers });
+                const res = await fetch('/api/config', { credentials: 'same-origin' });
                 const data = await res.json();
                 
                 document.getElementById('server-url').value = data.config.nightline_server_url || '';
@@ -669,7 +666,7 @@ DASHBOARD_HTML = """
         
         async function restartService(name) {
             try {
-                const res = await fetch(`/api/services/${name}/restart`, { method: 'POST', headers });
+                const res = await fetch(`/api/services/${name}/restart`, { method: 'POST', credentials: 'same-origin' });
                 const data = await res.json();
                 showToast(data.message, data.success ? 'success' : 'error');
                 setTimeout(loadStatus, 2000);
@@ -700,7 +697,8 @@ DASHBOARD_HTML = """
             try {
                 const res = await fetch('/api/config', {
                     method: 'PATCH',
-                    headers: { ...headers, 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
                     body: JSON.stringify(update),
                 });
                 const data = await res.json();
@@ -723,7 +721,7 @@ DASHBOARD_HTML = """
             container.innerHTML = '<div class="log-line">Connecting...</div>';
             
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            logWs = new WebSocket(`${protocol}//${window.location.host}/api/logs/ws/${logName}?token=${TOKEN}`);
+            logWs = new WebSocket(`${protocol}//${window.location.host}/api/logs/ws/${logName}`);
             
             logWs.onopen = () => { container.innerHTML = ''; };
             
