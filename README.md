@@ -38,27 +38,24 @@ A Mac Mini server that bridges iMessage/SMS communication between an iPhone and 
 
 ## Quick Start
 
-### One-Line Install (Recommended)
+### One-Line Install
 
 ```bash
-curl -fsSL https://tinyurl.com/288nshhu | bash
-```
-
-**With public tunnel (get a URL automatically, no signup):**
-
-```bash
-curl -fsSL https://tinyurl.com/288nshhu | bash -s -- --tunnel
+curl -fsSL https://raw.githubusercontent.com/Nightline-AI/iphone-bridge/main/scripts/bootstrap.sh | bash -s -- \
+  --client-id YOUR_CLIENT_ID \
+  --cloudflare-token YOUR_CLOUDFLARE_TOKEN
 ```
 
 This will:
 
-- Install all dependencies (Python, pip)
+- Install all dependencies (Python, cloudflared)
 - Clone and configure the bridge
 - Generate a secure webhook secret
-- Install as a system service that starts on boot
-- Create a public tunnel and **display your public URL**
+- Set up Cloudflare Tunnel with permanent URL
+- Install as system services that start on boot
+- Enable auto-updates (checks every 5 min)
 
-> 💡 Uses SSH tunneling (built into macOS) - no account or signup required!
+**Result:** `https://bridge-YOUR_CLIENT_ID.nightline.app`
 
 ### Manual Installation
 
