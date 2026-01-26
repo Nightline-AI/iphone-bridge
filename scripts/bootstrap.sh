@@ -123,12 +123,20 @@ if ! command -v brew &> /dev/null; then
 fi
 echo -e "${GREEN}✓${NC} Homebrew installed"
 
-# Check/install Python
-if ! command -v python3 &> /dev/null; then
-    echo -e "${YELLOW}Installing Python...${NC}"
-    brew install python@3.12
+# Install Python 3.12 via Homebrew (need 3.10+ for type hints)
+echo -e "${YELLOW}Installing Python 3.12...${NC}"
+brew install python@3.12 2>/dev/null || true
+
+# Use Homebrew Python explicitly (not system Python 3.9)
+if [[ -f "/opt/homebrew/bin/python3.12" ]]; then
+    PYTHON_CMD="/opt/homebrew/bin/python3.12"
+elif [[ -f "/usr/local/bin/python3.12" ]]; then
+    PYTHON_CMD="/usr/local/bin/python3.12"
+else
+    PYTHON_CMD=$(brew --prefix python@3.12)/bin/python3.12
 fi
-echo -e "${GREEN}✓${NC} Python $(python3 --version | cut -d' ' -f2)"
+
+echo -e "${GREEN}✓${NC} Python $($PYTHON_CMD --version | cut -d' ' -f2)"
 
 # Install cloudflared
 if ! command -v cloudflared &> /dev/null; then
@@ -160,10 +168,11 @@ PYTHON_BIN="$VENV_DIR/bin/python"
 
 rm -rf "$VENV_DIR"
 
-if ! python3 -m venv --copies "$VENV_DIR" 2>/dev/null; then
-    if ! python3 -m venv "$VENV_DIR" 2>/dev/null; then
-        pip3 install --user virtualenv
-        python3 -m virtualenv "$VENV_DIR"
+echo -e "${DIM}Creating virtual environment with $PYTHON_CMD...${NC}"
+if ! $PYTHON_CMD -m venv --copies "$VENV_DIR" 2>/dev/null; then
+    if ! $PYTHON_CMD -m venv "$VENV_DIR" 2>/dev/null; then
+        $PYTHON_CMD -m pip install --user virtualenv
+        $PYTHON_CMD -m virtualenv "$VENV_DIR"
     fi
 fi
 
