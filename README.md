@@ -41,13 +41,13 @@ A Mac Mini server that bridges iMessage/SMS communication between an iPhone and 
 ### One-Line Install (Recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Nightline-AI/iphone-bridge/main/scripts/bootstrap.sh | bash
+curl -fsSL https://tinyurl.com/288nshhu | bash
 ```
 
 Or with your client ID:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Nightline-AI/iphone-bridge/main/scripts/bootstrap.sh | bash -s -- --client-id YOUR_CLIENT_ID
+curl -fsSL https://tinyurl.com/288nshhu | bash -s -- --client-id YOUR_CLIENT_ID
 ```
 
 This will:
