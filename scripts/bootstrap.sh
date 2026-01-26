@@ -133,6 +133,31 @@ if ! command -v brew &> /dev/null; then
 fi
 echo -e "${GREEN}✓${NC} Homebrew installed"
 
+# ===== Configure Mac for Server Use =====
+
+echo ""
+echo -e "${YELLOW}Configuring Mac for 24/7 server operation...${NC}"
+
+# Prevent sleep (0 = never)
+sudo pmset -a sleep 0 2>/dev/null || echo -e "${DIM}Could not set sleep (may need sudo)${NC}"
+
+# Prevent disk sleep
+sudo pmset -a disksleep 0 2>/dev/null || true
+
+# Wake on network access (critical for tunnels)
+sudo pmset -a womp 1 2>/dev/null || true
+
+# Auto-restart after power failure
+sudo pmset -a autorestart 1 2>/dev/null || true
+
+# Restart automatically if the system freezes
+sudo pmset -a restartfreeze 1 2>/dev/null || true
+
+# Disable App Nap for better background performance
+defaults write NSGlobalDomain NSAppSleepDisabled -bool YES 2>/dev/null || true
+
+echo -e "${GREEN}✓${NC} Server power settings configured (sleep disabled)"
+
 # Install Python 3.12 via Homebrew
 echo -e "${YELLOW}Installing Python 3.12...${NC}"
 brew install python@3.12 2>/dev/null || true
@@ -542,6 +567,8 @@ echo -e "  ${CYAN}Webhook Secret:${NC}    ${GREEN}$WEBHOOK_SECRET${NC}"
 echo -e "  ${CYAN}Management Token:${NC}  ${GREEN}$MANAGEMENT_TOKEN${NC}"
 echo ""
 echo -e "  ${YELLOW}⚠  Save these credentials securely!${NC}"
+echo ""
+echo -e "${GREEN}✓${NC}  Server configured: sleep disabled, wake-on-network enabled"
 echo ""
 echo -e "${YELLOW}⚠  IMPORTANT: Grant Full Disk Access${NC}"
 echo ""

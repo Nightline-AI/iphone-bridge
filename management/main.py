@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from management.config import settings
 from management.auth import verify_token, require_auth
-from management.routes import services, config, logs, health, update
+from management.routes import services, config, logs, health, update, control
 
 # Configure logging
 logging.basicConfig(
@@ -42,6 +42,7 @@ app.include_router(services.router)
 app.include_router(config.router)
 app.include_router(logs.router)
 app.include_router(update.router)
+app.include_router(control.router)
 
 
 # ============================================================
@@ -616,6 +617,146 @@ DASHBOARD_HTML = """
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+        
+        /* Bridge Control Styles */
+        .control-status {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            margin-bottom: 1.25rem;
+        }
+        
+        .control-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+        }
+        
+        .control-queue {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        
+        .status-dot.paused {
+            background: var(--yellow);
+        }
+        
+        .btn-danger {
+            background: var(--red);
+            color: white;
+            border-color: var(--red);
+        }
+        
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+        
+        .btn-warning {
+            background: var(--yellow);
+            color: #000;
+            border-color: var(--yellow);
+        }
+        
+        .btn-warning:hover {
+            background: #ca8a04;
+        }
+        
+        .btn.active {
+            background: var(--accent);
+            color: white;
+            border-color: var(--accent);
+        }
+        
+        /* Queue modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        
+        .modal {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            width: 100%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .modal-header {
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .modal-header h3 {
+            font-size: 1rem;
+            font-weight: 500;
+        }
+        
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 1.25rem;
+        }
+        
+        .modal-close:hover {
+            color: var(--text);
+        }
+        
+        .modal-body {
+            padding: 1.25rem;
+            overflow-y: auto;
+        }
+        
+        .queue-item {
+            padding: 0.75rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            margin-bottom: 0.5rem;
+            font-size: 0.8125rem;
+        }
+        
+        .queue-item-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.25rem;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        
+        .queue-item-text {
+            color: var(--text);
+        }
+        
+        .empty-queue {
+            text-align: center;
+            color: var(--text-muted);
+            padding: 2rem;
+        }
     </style>
 </head>
 <body>
@@ -688,6 +829,43 @@ DASHBOARD_HTML = """
                         </div>
                         <button type="submit" class="btn btn-primary">Save & Restart</button>
                     </form>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-header">Bridge Control</div>
+                <div class="card-body">
+                    <div class="control-status" id="control-status">
+                        <div class="control-indicator">
+                            <span class="status-dot" id="control-dot"></span>
+                            <span id="control-mode">Loading...</span>
+                        </div>
+                        <div class="control-queue" id="control-queue">
+                            <span class="queue-badge" id="outbound-queue-badge">0</span>
+                            <span>outbound queued</span>
+                        </div>
+                    </div>
+                    <div class="action-group">
+                        <div class="action-label">Pause Mode</div>
+                        <div class="action-buttons">
+                            <button class="btn" id="btn-pause-outbound" onclick="pauseBridge('outbound')">
+                                Pause Outbound
+                            </button>
+                            <button class="btn" id="btn-pause-inbound" onclick="pauseBridge('inbound')">
+                                Pause All
+                            </button>
+                            <button class="btn btn-primary" id="btn-resume" onclick="resumeBridge()">
+                                Resume
+                            </button>
+                        </div>
+                    </div>
+                    <div class="action-group">
+                        <div class="action-label">Queue</div>
+                        <div class="action-buttons">
+                            <button class="btn" id="btn-clear-queue" onclick="clearQueue()">Clear Outbound Queue</button>
+                            <button class="btn" onclick="viewQueue()">View Queue</button>
+                        </div>
+                    </div>
                 </div>
             </div>
             
@@ -994,12 +1172,211 @@ DASHBOARD_HTML = """
             setTimeout(() => toast.remove(), 3000);
         }
         
+        // ============================================
+        // Bridge Control Functions
+        // ============================================
+        
+        let controlState = {
+            pause_inbound: false,
+            pause_outbound: false,
+            outbound_queue_size: 0,
+        };
+        
+        async function loadControlStatus() {
+            try {
+                const res = await fetch('/api/control/status', { credentials: 'same-origin' });
+                if (res.ok) {
+                    const data = await res.json();
+                    controlState = data;
+                    updateControlUI();
+                }
+            } catch (e) {
+                console.error('Failed to load control status:', e);
+            }
+        }
+        
+        function updateControlUI() {
+            const dot = document.getElementById('control-dot');
+            const mode = document.getElementById('control-mode');
+            const queueBadge = document.getElementById('outbound-queue-badge');
+            const btnPauseOutbound = document.getElementById('btn-pause-outbound');
+            const btnPauseInbound = document.getElementById('btn-pause-inbound');
+            const btnResume = document.getElementById('btn-resume');
+            const btnClearQueue = document.getElementById('btn-clear-queue');
+            
+            // Update queue badge
+            queueBadge.textContent = controlState.outbound_queue_size;
+            queueBadge.className = 'queue-badge' + (controlState.outbound_queue_size > 0 ? ' warning' : '');
+            
+            // Update status indicator
+            if (controlState.pause_inbound) {
+                dot.className = 'status-dot paused';
+                mode.textContent = 'Paused (All)';
+                btnPauseInbound.classList.add('active');
+                btnPauseOutbound.classList.remove('active');
+            } else if (controlState.pause_outbound) {
+                dot.className = 'status-dot paused';
+                mode.textContent = 'Paused (Outbound)';
+                btnPauseOutbound.classList.add('active');
+                btnPauseInbound.classList.remove('active');
+            } else {
+                dot.className = 'status-dot';
+                mode.textContent = 'Running';
+                btnPauseOutbound.classList.remove('active');
+                btnPauseInbound.classList.remove('active');
+            }
+            
+            // Enable/disable buttons
+            btnResume.disabled = !controlState.pause_inbound && !controlState.pause_outbound;
+            btnClearQueue.disabled = controlState.outbound_queue_size === 0;
+        }
+        
+        async function pauseBridge(type) {
+            const payload = {
+                pause_inbound: type === 'inbound',
+                pause_outbound: type === 'outbound' || type === 'inbound',
+            };
+            
+            try {
+                const res = await fetch('/api/control/pause', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(payload),
+                });
+                
+                const data = await res.json();
+                
+                if (res.ok) {
+                    controlState = {
+                        ...controlState,
+                        pause_inbound: data.pause_inbound,
+                        pause_outbound: data.pause_outbound,
+                        outbound_queue_size: data.outbound_queue_size,
+                    };
+                    updateControlUI();
+                    showToast(data.message, 'success');
+                } else {
+                    showToast(data.detail || 'Failed to pause', 'error');
+                }
+            } catch (e) {
+                showToast('Failed to pause bridge', 'error');
+            }
+        }
+        
+        async function resumeBridge() {
+            const sendQueued = controlState.outbound_queue_size > 0 
+                ? confirm(`Send ${controlState.outbound_queue_size} queued messages?`)
+                : true;
+            
+            try {
+                const res = await fetch(`/api/control/resume?send_queued=${sendQueued}`, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                });
+                
+                const data = await res.json();
+                
+                if (res.ok) {
+                    controlState = {
+                        ...controlState,
+                        pause_inbound: data.pause_inbound,
+                        pause_outbound: data.pause_outbound,
+                        outbound_queue_size: data.outbound_queue_size,
+                    };
+                    updateControlUI();
+                    showToast(data.message, 'success');
+                } else {
+                    showToast(data.detail || 'Failed to resume', 'error');
+                }
+            } catch (e) {
+                showToast('Failed to resume bridge', 'error');
+            }
+        }
+        
+        async function clearQueue() {
+            if (!confirm('Clear all queued messages without sending? This cannot be undone.')) {
+                return;
+            }
+            
+            try {
+                const res = await fetch('/api/control/clear-queue', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                });
+                
+                const data = await res.json();
+                
+                if (res.ok) {
+                    controlState.outbound_queue_size = 0;
+                    updateControlUI();
+                    showToast(data.message, 'success');
+                } else {
+                    showToast(data.detail || 'Failed to clear queue', 'error');
+                }
+            } catch (e) {
+                showToast('Failed to clear queue', 'error');
+            }
+        }
+        
+        async function viewQueue() {
+            try {
+                const res = await fetch('/api/control/status', { credentials: 'same-origin' });
+                const data = await res.json();
+                
+                // Create modal
+                const overlay = document.createElement('div');
+                overlay.className = 'modal-overlay';
+                overlay.onclick = (e) => {
+                    if (e.target === overlay) overlay.remove();
+                };
+                
+                const queueItems = data.outbound_queue.length > 0
+                    ? data.outbound_queue.map(item => `
+                        <div class="queue-item">
+                            <div class="queue-item-header">
+                                <span>To: ${item.phone}</span>
+                                <span>${new Date(item.queued_at * 1000).toLocaleTimeString()}</span>
+                            </div>
+                            <div class="queue-item-text">${escapeHtml(item.text_preview)}</div>
+                        </div>
+                    `).join('')
+                    : '<div class="empty-queue">No messages in queue</div>';
+                
+                overlay.innerHTML = `
+                    <div class="modal">
+                        <div class="modal-header">
+                            <h3>Outbound Queue (${data.outbound_queue.length})</h3>
+                            <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">×</button>
+                        </div>
+                        <div class="modal-body">
+                            ${queueItems}
+                        </div>
+                    </div>
+                `;
+                
+                document.body.appendChild(overlay);
+            } catch (e) {
+                showToast('Failed to load queue', 'error');
+            }
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // ============================================
         // Init
+        // ============================================
         loadStatus();
         loadConfig();
+        loadControlStatus();
         checkForUpdates();
         connectLogs(currentLog);
         setInterval(loadStatus, 10000);
+        setInterval(loadControlStatus, 5000);
     </script>
 </body>
 </html>

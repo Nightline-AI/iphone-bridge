@@ -40,12 +40,22 @@ _sender: iMessageSender | None = None
 _nightline_client: NightlineClient | None = None
 _message_queue: MessageQueue | None = None
 
+# Pause state
+# - pause_inbound: Won't receive/forward any messages (completely paused)
+# - pause_outbound: Can receive messages but won't send any out to contacts
+_pause_inbound: bool = False
+_pause_outbound: bool = False
+
+# Outbound queue (messages waiting to be sent when unpaused)
+_outbound_queue: list[dict] = []
+
 # Stats
 _stats = {
     "messages_received": 0,
     "messages_sent": 0,
     "messages_forwarded": 0,
     "messages_failed": 0,
+    "messages_held": 0,  # Messages held due to pause_outbound
     "last_message_at": None,
 }
 
@@ -73,6 +83,12 @@ async def _deliver_to_nightline(payload: dict) -> bool:
 async def _handle_incoming_message(message: IncomingMessage):
     """Callback for when a new message is received."""
     global _stats
+    
+    # Check if inbound is paused
+    if _pause_inbound:
+        logger.info(f"PAUSED (inbound): Ignoring message from {message.phone}")
+        return
+    
     _stats["messages_received"] += 1
     _stats["last_message_at"] = time.time()
     
@@ -202,9 +218,14 @@ async def verify_webhook_secret(
 
 class HealthResponse(BaseModel):
     """Comprehensive health response for monitoring."""
-    status: str  # "healthy", "degraded", "unhealthy"
+    status: str  # "healthy", "degraded", "unhealthy", "paused"
     version: str
     uptime_seconds: float
+    
+    # Pause state
+    pause_inbound: bool
+    pause_outbound: bool
+    outbound_queue_size: int
     
     # Component status
     watcher: dict
@@ -263,7 +284,9 @@ async def health_check():
     watcher_ok = _watcher.is_running if _watcher else False
     queue_size = _message_queue.size if _message_queue else 0
     
-    if not watcher_ok or not chat_db_ok:
+    if _pause_inbound or _pause_outbound:
+        overall_status = "paused"
+    elif not watcher_ok or not chat_db_ok:
         overall_status = "unhealthy"
     elif not nightline_ok or queue_size > 100:
         overall_status = "degraded"
@@ -274,6 +297,9 @@ async def health_check():
         status=overall_status,
         version="0.1.0",
         uptime_seconds=uptime,
+        pause_inbound=_pause_inbound,
+        pause_outbound=_pause_outbound,
+        outbound_queue_size=len(_outbound_queue),
         watcher={
             "running": watcher_ok,
             "last_rowid": _watcher.last_rowid if _watcher else 0,
@@ -297,6 +323,7 @@ async def health_check():
             "messages_sent": _stats["messages_sent"],
             "messages_forwarded": _stats["messages_forwarded"],
             "messages_failed": _stats["messages_failed"],
+            "messages_held": _stats["messages_held"],
             "last_message_seconds_ago": (
                 now - _stats["last_message_at"] 
                 if _stats["last_message_at"] 
@@ -331,8 +358,10 @@ async def send_message(request: SendMessageRequest):
     Send an iMessage/SMS.
     
     Requires X-Bridge-Secret header for authentication.
+    
+    If outbound is paused, message will be queued and sent when resumed.
     """
-    global _stats
+    global _stats, _outbound_queue
     
     if not _sender:
         raise HTTPException(
@@ -341,6 +370,23 @@ async def send_message(request: SendMessageRequest):
         )
 
     logger.info(f"Received send request: to={request.phone}, text={request.text[:50]}...")
+
+    # Check if outbound is paused
+    if _pause_outbound:
+        message_id = f"bridge-{uuid.uuid4().hex[:12]}"
+        _outbound_queue.append({
+            "id": message_id,
+            "phone": request.phone,
+            "text": request.text,
+            "queued_at": time.time(),
+        })
+        _stats["messages_held"] += 1
+        logger.info(f"PAUSED (outbound): Queued message to {request.phone} (queue size: {len(_outbound_queue)})")
+        return SendMessageResponse(
+            success=True,
+            message_id=message_id,
+            # Note: We return success because the message is queued, but add a hint
+        )
 
     response = await _sender.send(request.phone, request.text)
 
@@ -358,6 +404,177 @@ async def send_message(request: SendMessageRequest):
 async def detailed_status():
     """Detailed status for debugging (no auth required)."""
     return await health_check()
+
+
+# =====================================================
+# CONTROL ENDPOINTS
+# Pause/Resume/Clear functionality
+# =====================================================
+
+
+class PauseRequest(BaseModel):
+    """Request to pause bridge operations."""
+    pause_inbound: bool = False  # Stop receiving messages entirely
+    pause_outbound: bool = False  # Stop sending messages (queue them instead)
+
+
+class PauseResponse(BaseModel):
+    """Response with current pause state."""
+    pause_inbound: bool
+    pause_outbound: bool
+    outbound_queue_size: int
+    message: str
+
+
+@app.post(
+    "/control/pause",
+    response_model=PauseResponse,
+    dependencies=[Depends(verify_webhook_secret)],
+)
+async def pause_bridge(request: PauseRequest):
+    """
+    Pause bridge operations.
+    
+    - pause_inbound: Won't process incoming messages at all (completely paused)
+    - pause_outbound: Will receive messages but won't send any to contacts (queued)
+    
+    Requires X-Bridge-Secret header.
+    """
+    global _pause_inbound, _pause_outbound
+    
+    _pause_inbound = request.pause_inbound
+    _pause_outbound = request.pause_outbound
+    
+    states = []
+    if _pause_inbound:
+        states.append("inbound paused")
+    if _pause_outbound:
+        states.append("outbound paused")
+    
+    msg = " & ".join(states) if states else "running normally"
+    logger.info(f"Bridge control: {msg}")
+    
+    return PauseResponse(
+        pause_inbound=_pause_inbound,
+        pause_outbound=_pause_outbound,
+        outbound_queue_size=len(_outbound_queue),
+        message=f"Bridge is now {msg}",
+    )
+
+
+@app.post(
+    "/control/resume",
+    response_model=PauseResponse,
+    dependencies=[Depends(verify_webhook_secret)],
+)
+async def resume_bridge(send_queued: bool = True):
+    """
+    Resume bridge operations and optionally send queued messages.
+    
+    Args:
+        send_queued: If true (default), send all queued outbound messages.
+                    If false, leave them in queue (can be cleared separately).
+    
+    Requires X-Bridge-Secret header.
+    """
+    global _pause_inbound, _pause_outbound, _outbound_queue, _stats
+    
+    _pause_inbound = False
+    _pause_outbound = False
+    
+    sent_count = 0
+    failed_count = 0
+    
+    if send_queued and _outbound_queue and _sender:
+        logger.info(f"Resuming: sending {len(_outbound_queue)} queued messages...")
+        
+        for queued_msg in _outbound_queue:
+            response = await _sender.send(queued_msg["phone"], queued_msg["text"])
+            if response.success:
+                sent_count += 1
+                _stats["messages_sent"] += 1
+            else:
+                failed_count += 1
+                logger.error(f"Failed to send queued message to {queued_msg['phone']}: {response.error}")
+        
+        _outbound_queue = []
+        logger.info(f"Sent {sent_count} queued messages ({failed_count} failed)")
+    
+    return PauseResponse(
+        pause_inbound=_pause_inbound,
+        pause_outbound=_pause_outbound,
+        outbound_queue_size=len(_outbound_queue),
+        message=f"Bridge resumed. Sent {sent_count} queued messages." if send_queued else "Bridge resumed.",
+    )
+
+
+class ClearQueueResponse(BaseModel):
+    """Response after clearing queue."""
+    cleared_count: int
+    message: str
+
+
+@app.post(
+    "/control/clear-queue",
+    response_model=ClearQueueResponse,
+    dependencies=[Depends(verify_webhook_secret)],
+)
+async def clear_outbound_queue():
+    """
+    Clear all queued outbound messages without sending them.
+    
+    Use this when you want to discard queued messages.
+    
+    Requires X-Bridge-Secret header.
+    """
+    global _outbound_queue
+    
+    count = len(_outbound_queue)
+    _outbound_queue = []
+    
+    logger.info(f"Cleared {count} messages from outbound queue")
+    
+    return ClearQueueResponse(
+        cleared_count=count,
+        message=f"Cleared {count} messages from outbound queue",
+    )
+
+
+class ControlStatusResponse(BaseModel):
+    """Current control status."""
+    pause_inbound: bool
+    pause_outbound: bool
+    outbound_queue_size: int
+    outbound_queue: list[dict]  # Details of queued messages
+    retry_queue_size: int  # Nightline delivery retry queue
+
+
+@app.get(
+    "/control/status",
+    response_model=ControlStatusResponse,
+    dependencies=[Depends(verify_webhook_secret)],
+)
+async def control_status():
+    """
+    Get current pause state and queue status.
+    
+    Requires X-Bridge-Secret header.
+    """
+    return ControlStatusResponse(
+        pause_inbound=_pause_inbound,
+        pause_outbound=_pause_outbound,
+        outbound_queue_size=len(_outbound_queue),
+        outbound_queue=[
+            {
+                "id": m["id"],
+                "phone": m["phone"],
+                "text_preview": m["text"][:50] + "..." if len(m["text"]) > 50 else m["text"],
+                "queued_at": m["queued_at"],
+            }
+            for m in _outbound_queue
+        ],
+        retry_queue_size=_message_queue.size if _message_queue else 0,
+    )
 
 
 # =====================================================
