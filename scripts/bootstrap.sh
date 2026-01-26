@@ -20,7 +20,7 @@ NC='\033[0m'
 # Configuration
 REPO_URL="https://github.com/Nightline-AI/iphone-bridge"
 INSTALL_DIR="$HOME/iphone-bridge"
-NIGHTLINE_API="https://api.nightline.ai"
+NIGHTLINE_API="https://api.nightline.net"
 LOG_DIR="/var/log/iphone-bridge"
 TUNNEL_DOMAIN="nightline.app"
 

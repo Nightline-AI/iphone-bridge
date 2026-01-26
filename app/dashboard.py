@@ -218,17 +218,18 @@ DASHBOARD_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>iPhone Bridge Dashboard</title>
+    <title>iPhone Bridge</title>
     <style>
         :root {
-            --bg: #0c0c0f;
-            --surface: #16161c;
-            --surface-2: #1c1c24;
-            --border: #2a2a35;
-            --text: #e4e4e7;
-            --text-dim: #71717a;
-            --accent: #22d3ee;
-            --accent-dim: #0891b2;
+            --bg: #09090b;
+            --surface: #18181b;
+            --surface-2: #27272a;
+            --border: #3f3f46;
+            --text: #fafafa;
+            --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
             --green: #22c55e;
             --red: #ef4444;
             --yellow: #eab308;
@@ -237,70 +238,57 @@ DASHBOARD_HTML = """
         * { box-sizing: border-box; margin: 0; padding: 0; }
         
         body {
-            font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--bg);
             color: var(--text);
+            line-height: 1.5;
             min-height: 100vh;
         }
         
         .container {
-            max-width: 1400px;
+            max-width: 1200px;
             margin: 0 auto;
-            padding: 2rem;
+            padding: 3rem 2rem;
         }
         
         header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 2rem;
-            padding-bottom: 1.5rem;
-            border-bottom: 1px solid var(--border);
+            margin-bottom: 3rem;
         }
         
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-        }
-        
-        .logo-icon {
-            font-size: 2rem;
-        }
-        
-        .logo h1 {
-            font-size: 1.5rem;
+        header h1 {
+            font-size: 1.875rem;
             font-weight: 600;
-            background: linear-gradient(135deg, var(--accent), #a78bfa);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.025em;
+            margin-bottom: 0.5rem;
         }
         
-        .status-badges {
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 0.9375rem;
+        }
+        
+        .status-bar {
             display: flex;
-            gap: 0.75rem;
+            gap: 1.5rem;
+            margin-top: 1.5rem;
         }
         
-        .badge {
+        .status-item {
             display: flex;
             align-items: center;
             gap: 0.5rem;
-            padding: 0.5rem 1rem;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 9999px;
-            font-size: 0.8rem;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
         }
         
-        .badge .dot {
+        .status-dot {
             width: 8px;
             height: 8px;
             border-radius: 50%;
             background: var(--green);
         }
         
-        .badge .dot.error { background: var(--red); }
-        .badge .dot.warning { background: var(--yellow); }
+        .status-dot.offline { background: var(--red); }
         
         .grid {
             display: grid;
@@ -308,7 +296,7 @@ DASHBOARD_HTML = """
             gap: 1.5rem;
         }
         
-        @media (max-width: 1000px) {
+        @media (max-width: 900px) {
             .grid { grid-template-columns: 1fr; }
         }
         
@@ -316,11 +304,10 @@ DASHBOARD_HTML = """
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: 12px;
-            overflow: hidden;
         }
         
         .card-header {
-            padding: 1rem 1.25rem;
+            padding: 1.25rem 1.5rem;
             border-bottom: 1px solid var(--border);
             display: flex;
             justify-content: space-between;
@@ -328,61 +315,69 @@ DASHBOARD_HTML = """
         }
         
         .card-header h2 {
-            font-size: 0.9rem;
-            font-weight: 600;
-            color: var(--text-dim);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
+            font-size: 0.9375rem;
+            font-weight: 500;
+            color: var(--text);
         }
         
         .card-body {
-            padding: 1.25rem;
+            padding: 1.5rem;
         }
         
-        .url-display {
-            background: var(--surface-2);
-            padding: 1rem;
+        .url-box {
+            background: var(--bg);
+            border: 1px solid var(--border);
             border-radius: 8px;
-            font-family: 'SF Mono', 'Fira Code', monospace;
-            font-size: 0.9rem;
+            padding: 1rem 1.25rem;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.875rem;
             color: var(--accent);
-            word-break: break-all;
-            margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
         }
         
-        .url-display a {
+        .url-box a {
             color: inherit;
             text-decoration: none;
         }
         
-        .url-display a:hover {
+        .url-box a:hover {
             text-decoration: underline;
         }
         
+        .help-text {
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+        }
+        
         .form-group {
-            margin-bottom: 1rem;
+            margin-bottom: 1.25rem;
+        }
+        
+        .form-group:last-of-type {
+            margin-bottom: 1.5rem;
         }
         
         label {
             display: block;
-            font-size: 0.75rem;
+            font-size: 0.8125rem;
             font-weight: 500;
-            color: var(--text-dim);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
+            color: var(--text-secondary);
             margin-bottom: 0.5rem;
         }
         
-        input, select {
+        input {
             width: 100%;
-            padding: 0.75rem 1rem;
-            background: var(--surface-2);
+            padding: 0.625rem 0.875rem;
+            background: var(--bg);
             border: 1px solid var(--border);
-            border-radius: 8px;
+            border-radius: 6px;
             color: var(--text);
             font-family: inherit;
-            font-size: 0.9rem;
-            transition: border-color 0.2s;
+            font-size: 0.875rem;
+            transition: border-color 0.15s;
         }
         
         input:focus {
@@ -391,86 +386,43 @@ DASHBOARD_HTML = """
         }
         
         input.mono {
-            font-family: 'SF Mono', 'Fira Code', monospace;
-            font-size: 0.85rem;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
         }
         
         .btn {
             display: inline-flex;
             align-items: center;
+            justify-content: center;
             gap: 0.5rem;
-            padding: 0.65rem 1.25rem;
+            padding: 0.5rem 1rem;
             background: var(--accent);
-            color: var(--bg);
+            color: white;
             border: none;
-            border-radius: 8px;
+            border-radius: 6px;
             font-family: inherit;
-            font-size: 0.85rem;
-            font-weight: 600;
+            font-size: 0.8125rem;
+            font-weight: 500;
             cursor: pointer;
-            transition: background 0.2s;
+            transition: background 0.15s;
         }
         
-        .btn:hover { background: var(--accent-dim); }
+        .btn:hover { background: var(--accent-hover); }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; }
         
-        .btn-secondary {
-            background: var(--surface-2);
-            color: var(--text);
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-secondary);
             border: 1px solid var(--border);
         }
         
-        .btn-secondary:hover {
-            background: var(--border);
+        .btn-ghost:hover {
+            background: var(--surface-2);
+            color: var(--text);
         }
         
         .btn-sm {
-            padding: 0.4rem 0.75rem;
+            padding: 0.375rem 0.75rem;
             font-size: 0.75rem;
-        }
-        
-        .logs {
-            background: #0a0a0c;
-            border-radius: 8px;
-            padding: 1rem;
-            height: 350px;
-            overflow-y: auto;
-            font-family: 'SF Mono', 'Fira Code', monospace;
-            font-size: 0.75rem;
-            line-height: 1.6;
-        }
-        
-        .log-line {
-            white-space: pre-wrap;
-            word-break: break-all;
-        }
-        
-        .log-line.error { color: var(--red); }
-        .log-line.warning { color: var(--yellow); }
-        .log-line.info { color: var(--text-dim); }
-        
-        .tabs {
-            display: flex;
-            gap: 0.25rem;
-            margin-bottom: 1rem;
-        }
-        
-        .tab {
-            padding: 0.5rem 1rem;
-            background: transparent;
-            border: none;
-            color: var(--text-dim);
-            font-family: inherit;
-            font-size: 0.8rem;
-            cursor: pointer;
-            border-radius: 6px;
-            transition: all 0.2s;
-        }
-        
-        .tab:hover { color: var(--text); }
-        .tab.active {
-            background: var(--surface-2);
-            color: var(--accent);
         }
         
         .services {
@@ -479,12 +431,13 @@ DASHBOARD_HTML = """
             gap: 0.75rem;
         }
         
-        .service {
+        .service-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
             padding: 0.75rem 1rem;
-            background: var(--surface-2);
+            background: var(--bg);
+            border: 1px solid var(--border);
             border-radius: 8px;
         }
         
@@ -494,137 +447,187 @@ DASHBOARD_HTML = """
             gap: 0.75rem;
         }
         
-        .service-status {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: var(--green);
+        .service-name {
+            font-size: 0.875rem;
+            font-weight: 500;
         }
         
-        .service-status.stopped { background: var(--red); }
+        .service-status {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        
+        .logs-card {
+            grid-column: 1 / -1;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 0.25rem;
+        }
+        
+        .tab {
+            padding: 0.375rem 0.875rem;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-family: inherit;
+            font-size: 0.8125rem;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.15s;
+        }
+        
+        .tab:hover { color: var(--text-secondary); }
+        
+        .tab.active {
+            background: var(--surface-2);
+            color: var(--text);
+        }
+        
+        .logs {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            height: 320px;
+            overflow-y: auto;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.75rem;
+            line-height: 1.7;
+        }
+        
+        .log-line {
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: var(--text-muted);
+        }
+        
+        .log-line.error { color: var(--red); }
+        .log-line.warning { color: var(--yellow); }
         
         .toast {
             position: fixed;
-            bottom: 2rem;
-            right: 2rem;
-            padding: 1rem 1.5rem;
+            bottom: 1.5rem;
+            right: 1.5rem;
+            padding: 0.75rem 1.25rem;
             background: var(--surface);
-            border: 1px solid var(--green);
+            border: 1px solid var(--border);
             border-radius: 8px;
-            animation: slideIn 0.3s ease;
+            font-size: 0.875rem;
+            animation: slideIn 0.2s ease;
+            z-index: 1000;
         }
         
+        .toast.success { border-color: var(--green); }
         .toast.error { border-color: var(--red); }
         
         @keyframes slideIn {
-            from { transform: translateY(1rem); opacity: 0; }
+            from { transform: translateY(0.5rem); opacity: 0; }
             to { transform: translateY(0); opacity: 1; }
         }
         
         .copy-btn {
             background: none;
             border: none;
-            color: var(--text-dim);
+            color: var(--text-muted);
             cursor: pointer;
-            padding: 0.25rem;
+            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
         }
         
-        .copy-btn:hover { color: var(--accent); }
+        .copy-btn:hover { color: var(--text); }
         
-        .full-width { grid-column: 1 / -1; }
+        .actions {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <div class="logo">
-                <span class="logo-icon">📱</span>
-                <h1>iPhone Bridge</h1>
-            </div>
-            <div class="status-badges">
-                <div class="badge">
-                    <span class="dot" id="bridge-status-dot"></span>
+            <h1>iPhone Bridge</h1>
+            <p class="subtitle">iMessage relay service</p>
+            <div class="status-bar">
+                <div class="status-item">
+                    <span class="status-dot" id="bridge-dot"></span>
                     <span>Bridge</span>
                 </div>
-                <div class="badge">
-                    <span class="dot" id="tunnel-status-dot"></span>
+                <div class="status-item">
+                    <span class="status-dot" id="tunnel-dot"></span>
                     <span>Tunnel</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-dot" id="updater-dot"></span>
+                    <span>Auto-update</span>
                 </div>
             </div>
         </header>
         
         <div class="grid">
-            <!-- Tunnel URL Card -->
             <div class="card">
                 <div class="card-header">
-                    <h2>🌐 Public URL</h2>
-                    <button class="copy-btn" onclick="copyUrl()">📋 Copy</button>
+                    <h2>Public URL</h2>
+                    <button class="copy-btn" onclick="copyUrl()">Copy</button>
                 </div>
                 <div class="card-body">
-                    <div class="url-display">
+                    <div class="url-box">
                         <a href="#" id="tunnel-url" target="_blank">Loading...</a>
                     </div>
-                    <p style="color: var(--text-dim); font-size: 0.8rem;">
-                        Add this URL to your Nightline dashboard as the Bridge URL
-                    </p>
+                    <p class="help-text">Use this URL in your Nightline dashboard</p>
                 </div>
             </div>
             
-            <!-- Services Card -->
             <div class="card">
                 <div class="card-header">
-                    <h2>⚡ Services</h2>
+                    <h2>Services</h2>
                 </div>
                 <div class="card-body">
-                    <div class="services" id="services-list">
-                        <!-- Populated by JS -->
-                    </div>
+                    <div class="services" id="services-list"></div>
                 </div>
             </div>
             
-            <!-- Configuration Card -->
             <div class="card">
                 <div class="card-header">
-                    <h2>⚙️ Configuration</h2>
+                    <h2>Configuration</h2>
                 </div>
                 <div class="card-body">
                     <form id="config-form">
                         <div class="form-group">
-                            <label>Nightline Server URL</label>
-                            <input type="url" id="server-url" placeholder="https://api.nightline.ai">
+                            <label>Server URL</label>
+                            <input type="url" id="server-url" placeholder="https://api.nightline.net">
                         </div>
                         <div class="form-group">
                             <label>Client ID</label>
-                            <input type="text" id="client-id" class="mono" placeholder="your-client-id">
+                            <input type="text" id="client-id" class="mono">
                         </div>
                         <div class="form-group">
                             <label>Webhook Secret</label>
-                            <input type="text" id="webhook-secret" class="mono" placeholder="your-secret">
+                            <input type="text" id="webhook-secret" class="mono">
                         </div>
-                        <button type="submit" class="btn">💾 Save & Restart</button>
+                        <button type="submit" class="btn">Save & Restart</button>
                     </form>
                 </div>
             </div>
             
-            <!-- Quick Actions Card -->
             <div class="card">
                 <div class="card-header">
-                    <h2>🔧 Quick Actions</h2>
+                    <h2>Actions</h2>
                 </div>
                 <div class="card-body">
-                    <div style="display: flex; flex-wrap: wrap; gap: 0.75rem;">
-                        <button class="btn btn-secondary" onclick="restartService('bridge')">🔄 Restart Bridge</button>
-                        <button class="btn btn-secondary" onclick="restartService('tunnel')">🔄 Restart Tunnel</button>
-                        <button class="btn btn-secondary" onclick="checkHealth()">❤️ Health Check</button>
-                        <button class="btn btn-secondary" onclick="forceUpdate()">⬆️ Force Update</button>
+                    <div class="actions">
+                        <button class="btn btn-ghost" onclick="restartService('bridge')">Restart Bridge</button>
+                        <button class="btn btn-ghost" onclick="restartService('tunnel')">Restart Tunnel</button>
+                        <button class="btn btn-ghost" onclick="checkHealth()">Health Check</button>
                     </div>
                 </div>
             </div>
             
-            <!-- Logs Card (Full Width) -->
-            <div class="card full-width">
+            <div class="card logs-card">
                 <div class="card-header">
-                    <h2>📋 Logs</h2>
+                    <h2>Logs</h2>
                     <div class="tabs">
                         <button class="tab active" data-log="bridge.log">Bridge</button>
                         <button class="tab" data-log="tunnel.log">Tunnel</button>
@@ -633,7 +636,7 @@ DASHBOARD_HTML = """
                 </div>
                 <div class="card-body">
                     <div class="logs" id="logs-container">
-                        <div class="log-line info">Connecting to logs...</div>
+                        <div class="log-line">Connecting...</div>
                     </div>
                 </div>
             </div>
@@ -644,10 +647,8 @@ DASHBOARD_HTML = """
         let currentLog = 'bridge.log';
         let ws = null;
         
-        // Load initial data
         async function loadData() {
             try {
-                // Load config
                 const configRes = await fetch('/dashboard/api/config');
                 const config = await configRes.json();
                 
@@ -660,84 +661,67 @@ DASHBOARD_HTML = """
                 urlEl.textContent = tunnelUrl;
                 urlEl.href = tunnelUrl.startsWith('http') ? tunnelUrl : '#';
                 
-                // Load status
                 const statusRes = await fetch('/dashboard/api/status');
                 const status = await statusRes.json();
                 
                 updateServices(status.services);
                 
             } catch (e) {
-                console.error('Failed to load data:', e);
+                console.error('Failed to load:', e);
             }
         }
         
         function updateServices(services) {
             const container = document.getElementById('services-list');
-            const serviceNames = {
-                bridge: { name: 'Bridge Server', icon: '🖥️' },
-                tunnel: { name: 'Cloudflare Tunnel', icon: '🌐' },
-                updater: { name: 'Auto Updater', icon: '🔄' },
+            const names = {
+                bridge: 'Bridge Server',
+                tunnel: 'Cloudflare Tunnel',
+                updater: 'Auto Updater',
             };
             
-            container.innerHTML = Object.entries(services).map(([key, svc]) => {
-                const info = serviceNames[key] || { name: key, icon: '⚙️' };
-                return `
-                    <div class="service">
-                        <div class="service-info">
-                            <span class="service-status ${svc.running ? '' : 'stopped'}"></span>
-                            <span>${info.icon} ${info.name}</span>
+            container.innerHTML = Object.entries(services).map(([key, svc]) => `
+                <div class="service-row">
+                    <div class="service-info">
+                        <span class="status-dot ${svc.running ? '' : 'offline'}"></span>
+                        <div>
+                            <div class="service-name">${names[key] || key}</div>
+                            <div class="service-status">${svc.running ? 'Running' : 'Stopped'}</div>
                         </div>
-                        <button class="btn btn-secondary btn-sm" onclick="restartService('${key}')">Restart</button>
                     </div>
-                `;
-            }).join('');
+                    <button class="btn btn-ghost btn-sm" onclick="restartService('${key}')">Restart</button>
+                </div>
+            `).join('');
             
-            // Update header badges
-            document.getElementById('bridge-status-dot').className = 
-                'dot ' + (services.bridge?.running ? '' : 'error');
-            document.getElementById('tunnel-status-dot').className = 
-                'dot ' + (services.tunnel?.running ? '' : 'error');
+            document.getElementById('bridge-dot').className = 'status-dot' + (services.bridge?.running ? '' : ' offline');
+            document.getElementById('tunnel-dot').className = 'status-dot' + (services.tunnel?.running ? '' : ' offline');
+            document.getElementById('updater-dot').className = 'status-dot' + (services.updater?.running ? '' : ' offline');
         }
         
-        // Connect to log websocket
         function connectLogs(logName) {
             if (ws) ws.close();
             
             const container = document.getElementById('logs-container');
-            container.innerHTML = '<div class="log-line info">Connecting...</div>';
+            container.innerHTML = '<div class="log-line">Connecting...</div>';
             
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             ws = new WebSocket(`${protocol}//${window.location.host}/dashboard/ws/logs/${logName}`);
             
-            ws.onopen = () => {
-                container.innerHTML = '';
-            };
+            ws.onopen = () => { container.innerHTML = ''; };
             
             ws.onmessage = (event) => {
                 const line = document.createElement('div');
                 line.className = 'log-line';
-                
                 if (event.data.includes('ERROR')) line.classList.add('error');
                 else if (event.data.includes('WARNING')) line.classList.add('warning');
-                else if (event.data.includes('INFO')) line.classList.add('info');
-                
                 line.textContent = event.data;
                 container.appendChild(line);
                 container.scrollTop = container.scrollHeight;
-                
-                // Limit lines
-                while (container.children.length > 500) {
-                    container.removeChild(container.firstChild);
-                }
+                while (container.children.length > 500) container.removeChild(container.firstChild);
             };
             
-            ws.onclose = () => {
-                // Reconnect after 2s
-                setTimeout(() => connectLogs(currentLog), 2000);
-            };
+            ws.onclose = () => { setTimeout(() => connectLogs(currentLog), 2000); };
         }
         
-        // Tab switching
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -747,42 +731,35 @@ DASHBOARD_HTML = """
             });
         });
         
-        // Config form
         document.getElementById('config-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
-            const data = {
-                nightline_server_url: document.getElementById('server-url').value,
-                nightline_client_id: document.getElementById('client-id').value,
-                webhook_secret: document.getElementById('webhook-secret').value,
-            };
             
             try {
                 const res = await fetch('/dashboard/api/config', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
+                    body: JSON.stringify({
+                        nightline_server_url: document.getElementById('server-url').value,
+                        nightline_client_id: document.getElementById('client-id').value,
+                        webhook_secret: document.getElementById('webhook-secret').value,
+                    })
                 });
                 
                 const result = await res.json();
-                showToast(result.message);
-                
-                // Reload after restart
+                showToast(result.message, 'success');
                 setTimeout(loadData, 2000);
-                
             } catch (e) {
-                showToast('Failed to save config', true);
+                showToast('Failed to save', 'error');
             }
         });
         
         async function restartService(service) {
             try {
-                const res = await fetch(`/dashboard/api/restart/${service}`, { method: 'POST' });
-                const result = await res.json();
-                showToast(result.message);
+                await fetch(`/dashboard/api/restart/${service}`, { method: 'POST' });
+                showToast('Restarting...', 'success');
                 setTimeout(loadData, 2000);
             } catch (e) {
-                showToast('Failed to restart', true);
+                showToast('Failed', 'error');
             }
         }
         
@@ -790,37 +767,28 @@ DASHBOARD_HTML = """
             try {
                 const res = await fetch('/health');
                 const data = await res.json();
-                showToast(`Status: ${data.status}`);
+                showToast(`Status: ${data.status}`, data.status === 'healthy' ? 'success' : 'error');
             } catch (e) {
-                showToast('Health check failed', true);
+                showToast('Health check failed', 'error');
             }
-        }
-        
-        async function forceUpdate() {
-            showToast('Checking for updates...');
-            // Trigger the update script
-            await fetch('/dashboard/api/restart/updater', { method: 'POST' });
         }
         
         function copyUrl() {
             const url = document.getElementById('tunnel-url').textContent;
             navigator.clipboard.writeText(url);
-            showToast('URL copied!');
+            showToast('Copied', 'success');
         }
         
-        function showToast(message, isError = false) {
+        function showToast(message, type = 'success') {
             const toast = document.createElement('div');
-            toast.className = `toast ${isError ? 'error' : ''}`;
+            toast.className = `toast ${type}`;
             toast.textContent = message;
             document.body.appendChild(toast);
             setTimeout(() => toast.remove(), 3000);
         }
         
-        // Initial load
         loadData();
         connectLogs(currentLog);
-        
-        // Refresh status every 10s
         setInterval(loadData, 10000);
     </script>
 </body>

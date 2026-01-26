@@ -79,7 +79,7 @@ Edit `.env` with your settings:
 
 ```env
 # Nightline server URL
-NIGHTLINE_SERVER_URL=https://api.nightline.ai
+NIGHTLINE_SERVER_URL=https://api.nightline.net
 
 # Generate a secure random secret (share this with Nightline server)
 WEBHOOK_SECRET=your-secure-random-string-here
