@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     # Mock mode - don't connect to chat.db (for development/testing)
     mock_mode: bool = False
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()
