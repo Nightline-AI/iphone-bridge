@@ -167,21 +167,22 @@ class iMessageWatcher:
         logger.info(f"Starting iMessage watcher, polling every {self.poll_interval}s")
 
         while self._running:
+            conn = None
             try:
-                with self._get_connection() as conn:
-                    messages = self._fetch_new_messages(conn)
+                conn = self._get_connection()
+                messages = self._fetch_new_messages(conn)
 
-                    for msg in messages:
-                        # Update last_rowid immediately to avoid reprocessing on error
-                        self.last_rowid = msg.rowid
+                for msg in messages:
+                    # Update last_rowid immediately to avoid reprocessing on error
+                    self.last_rowid = msg.rowid
 
-                        # Only process inbound messages (not from_me)
-                        if not msg.is_from_me:
-                            logger.info(f"New message: {msg}")
-                            try:
-                                await self.on_message(msg)
-                            except Exception as e:
-                                logger.error(f"Error in message callback: {e}")
+                    # Only process inbound messages (not from_me)
+                    if not msg.is_from_me:
+                        logger.info(f"New message: {msg}")
+                        try:
+                            await self.on_message(msg)
+                        except Exception as e:
+                            logger.error(f"Error in message callback: {e}")
 
             except FileNotFoundError as e:
                 logger.error(str(e))
@@ -191,6 +192,10 @@ class iMessageWatcher:
                 logger.error(f"Database error: {e}")
             except Exception as e:
                 logger.error(f"Unexpected error in poll loop: {e}")
+            finally:
+                # CRITICAL: Always close the connection to avoid FD leak
+                if conn:
+                    conn.close()
 
             await asyncio.sleep(self.poll_interval)
 
@@ -209,9 +214,10 @@ class iMessageWatcher:
 
         # Initialize last_rowid
         if skip_historical:
+            conn = None
             try:
-                with self._get_connection() as conn:
-                    self.last_rowid = self._get_latest_rowid(conn)
+                conn = self._get_connection()
+                self.last_rowid = self._get_latest_rowid(conn)
                 logger.info(f"Skipping historical messages, starting from ROWID={self.last_rowid}")
             except FileNotFoundError:
                 logger.warning("Database not found, will retry in poll loop")
@@ -220,6 +226,9 @@ class iMessageWatcher:
                 logger.warning(f"Could not connect to chat.db: {e}")
                 logger.warning("Watcher will retry in poll loop. Grant Full Disk Access to fix.")
                 self.last_rowid = 0
+            finally:
+                if conn:
+                    conn.close()
 
         self._task = asyncio.create_task(self._poll_loop())
 
