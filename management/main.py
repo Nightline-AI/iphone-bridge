@@ -55,7 +55,7 @@ LOGIN_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - iPhone Bridge</title>
+    <title>Login - {{DISPLAY_NAME}}</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         
@@ -149,7 +149,7 @@ LOGIN_HTML = """
 </head>
 <body>
     <div class="card">
-        <h1>iPhone Bridge</h1>
+        <h1>{{DISPLAY_NAME}}</h1>
         <p class="subtitle">Enter your management token</p>
         
         {{ERROR}}
@@ -168,13 +168,31 @@ LOGIN_HTML = """
 """
 
 
+def get_display_name() -> str:
+    """Read display name from .env file."""
+    env_path = settings.env_file_path
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if line.startswith("BRIDGE_DISPLAY_NAME="):
+                return line.split("=", 1)[1].strip()
+    return "iPhone Bridge"
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(error: str = ""):
     """Show login page."""
     error_html = ""
     if error:
         error_html = f'<div class="error">{error}</div>'
-    return LOGIN_HTML.replace("{{ERROR}}", error_html)
+    
+    display_name = get_display_name()
+    
+    return (
+        LOGIN_HTML
+        .replace("{{ERROR}}", error_html)
+        .replace("{{DISPLAY_NAME}}", display_name)
+    )
 
 
 @app.post("/login")
