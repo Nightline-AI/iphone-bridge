@@ -231,6 +231,27 @@ class StatusTracker:
         five_min_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
         apple_time = self._datetime_to_apple_timestamp(five_min_ago)
         
+        logger.info(f"🔎 Querying for messages since {five_min_ago} (apple_time={apple_time})")
+        
+        # First, let's debug by checking all recent outgoing messages
+        debug_query = """
+            SELECT 
+                m.guid,
+                m.text,
+                m.date,
+                m.is_from_me,
+                h.id as handle_id
+            FROM message m
+            LEFT JOIN handle h ON m.handle_id = h.ROWID
+            ORDER BY m.ROWID DESC
+            LIMIT 5
+        """
+        debug_cursor = conn.execute(debug_query)
+        debug_rows = list(debug_cursor)
+        logger.info(f"🔎 Last 5 messages in chat.db:")
+        for row in debug_rows:
+            logger.info(f"   - is_from_me={row['is_from_me']}, date={row['date']}, handle={row['handle_id']}, text={row['text'][:30] if row['text'] else 'None'}...")
+        
         query = """
             SELECT 
                 m.guid,
