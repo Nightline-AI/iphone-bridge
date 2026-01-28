@@ -4,6 +4,7 @@ from app.imessage.models import IncomingMessage
 from app.imessage.sender import iMessageSender
 from app.imessage.watcher import iMessageWatcher
 from app.imessage.mock import MockiMessageWatcher, MockiMessageSender
+from app.imessage.status_tracker import StatusTracker, StatusUpdate
 
 __all__ = [
     "IncomingMessage",
@@ -11,4 +12,6 @@ __all__ = [
     "iMessageWatcher",
     "MockiMessageWatcher",
     "MockiMessageSender",
+    "StatusTracker",
+    "StatusUpdate",
 ]

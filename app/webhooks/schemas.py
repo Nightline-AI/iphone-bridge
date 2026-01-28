@@ -11,6 +11,7 @@ class WebhookEvent(str, Enum):
 
     MESSAGE_RECEIVED = "message.received"
     MESSAGE_DELIVERED = "message.delivered"
+    MESSAGE_READ = "message.read"
     MESSAGE_FAILED = "message.failed"
 
 
@@ -23,6 +24,16 @@ class MessageReceivedEvent(BaseModel):
     received_at: datetime = Field(..., description="When the message was received")
     message_id: str = Field(..., description="Unique message identifier (GUID)")
     is_imessage: bool = Field(True, description="True if iMessage, False if SMS")
+
+
+class MessageStatusEvent(BaseModel):
+    """Payload sent to Nightline when a message status changes (delivered/read)."""
+
+    event: str = Field(..., description="message.delivered or message.read")
+    phone: str = Field(..., description="Recipient phone number in E.164 format")
+    message_id: str = Field(..., description="Message GUID from chat.db")
+    timestamp: str = Field(..., description="ISO timestamp of status change")
+    is_imessage: bool = Field(True, description="True if iMessage")
 
 
 class SendMessageRequest(BaseModel):

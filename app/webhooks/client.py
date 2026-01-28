@@ -1,12 +1,16 @@
 """HTTP client for sending webhooks to Nightline server."""
 
 import logging
+from typing import TYPE_CHECKING
 
 import httpx
 
 from app.config import settings
 from app.imessage.models import IncomingMessage
-from app.webhooks.schemas import MessageReceivedEvent
+from app.webhooks.schemas import MessageReceivedEvent, MessageStatusEvent
+
+if TYPE_CHECKING:
+    from app.imessage.status_tracker import StatusUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -124,4 +128,58 @@ class NightlineClient:
             return response.status_code == 200
         except Exception as e:
             logger.warning(f"Nightline server health check failed: {e}")
+            return False
+    
+    async def send_status_update(self, update: "StatusUpdate") -> bool:
+        """
+        Send a delivery/read status update to the Nightline server.
+        
+        Called when we detect that a sent message was delivered or read.
+        
+        Args:
+            update: The status update to send
+            
+        Returns:
+            True if successfully delivered, False otherwise
+        """
+        event = MessageStatusEvent(
+            event=f"message.{update.status}",  # "message.delivered" or "message.read"
+            phone=update.phone,
+            message_id=update.guid,
+            timestamp=update.timestamp.isoformat(),
+            is_imessage=update.is_imessage,
+        )
+        
+        client_id = settings.nightline_client_id
+        if not client_id:
+            logger.error("NIGHTLINE_CLIENT_ID not configured - cannot send status update")
+            return False
+        
+        url = f"{self.base_url}/webhooks/iphone-bridge/{client_id}/status"
+        
+        try:
+            client = await self._get_client()
+            response = await client.post(url, json=event.model_dump(mode="json"))
+            
+            if response.status_code == 200:
+                logger.info(
+                    f"Sent {update.status} status for message to {update.phone} "
+                    f"(id={update.guid[:8]}...)"
+                )
+                return True
+            
+            logger.error(
+                f"Failed to send status update: HTTP {response.status_code} - "
+                f"{response.text}"
+            )
+            return False
+        
+        except httpx.TimeoutException:
+            logger.error(f"Timeout sending status update to {url}")
+            return False
+        except httpx.ConnectError as e:
+            logger.error(f"Connection error sending status update: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error sending status update: {e}")
             return False

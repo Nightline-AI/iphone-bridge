@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.config import settings
-from app.imessage import IncomingMessage, iMessageSender, iMessageWatcher, MockiMessageWatcher, MockiMessageSender
+from app.imessage import IncomingMessage, iMessageSender, iMessageWatcher, MockiMessageWatcher, MockiMessageSender, StatusUpdate
 from app.webhooks import NightlineClient, SendMessageRequest, SendMessageResponse
 from app.services.queue import MessageQueue
 
@@ -56,6 +56,7 @@ _stats = {
     "messages_forwarded": 0,
     "messages_failed": 0,
     "messages_held": 0,  # Messages held due to pause_outbound
+    "status_updates_sent": 0,  # Delivery/read status updates
     "last_message_at": None,
 }
 
@@ -117,6 +118,20 @@ async def _handle_incoming_message(message: IncomingMessage):
         logger.warning("Nightline client not initialized, message not forwarded")
 
 
+async def _handle_status_change(update: StatusUpdate):
+    """Callback for delivery/read status changes on sent messages."""
+    global _stats
+    
+    logger.info(f"Status update: {update.status} for message to {update.phone}")
+    
+    if _nightline_client:
+        success = await _nightline_client.send_status_update(update)
+        if success:
+            _stats["status_updates_sent"] += 1
+    else:
+        logger.warning("Nightline client not initialized, status update not sent")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown logic."""
@@ -141,6 +156,7 @@ async def lifespan(app: FastAPI):
         _sender = iMessageSender()
         _watcher = iMessageWatcher(
             on_message=_handle_incoming_message,
+            on_status_change=_handle_status_change,  # Track delivery/read receipts
             poll_interval=settings.poll_interval,
         )
     
@@ -324,6 +340,8 @@ async def health_check():
             "messages_forwarded": _stats["messages_forwarded"],
             "messages_failed": _stats["messages_failed"],
             "messages_held": _stats["messages_held"],
+            "status_updates_sent": _stats["status_updates_sent"],
+            "tracking_count": _watcher.status_tracker.tracking_count if _watcher and hasattr(_watcher, 'status_tracker') else 0,
             "last_message_seconds_ago": (
                 now - _stats["last_message_at"] 
                 if _stats["last_message_at"] 
@@ -393,6 +411,15 @@ async def send_message(request: SendMessageRequest):
     if response.success:
         _stats["messages_sent"] += 1
         message_id = f"bridge-{uuid.uuid4().hex[:12]}"
+        
+        # Track for delivery/read receipts (iMessage only - SMS doesn't support this)
+        if _watcher and hasattr(_watcher, 'track_sent_message'):
+            _watcher.track_sent_message(
+                phone=request.phone,
+                text=request.text,
+                is_imessage=True,  # Assume iMessage - will be validated by tracker
+            )
+        
         return SendMessageResponse(success=True, message_id=message_id)
     else:
         return SendMessageResponse(success=False, error=response.error)
