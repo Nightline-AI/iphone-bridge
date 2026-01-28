@@ -227,84 +227,83 @@ class StatusTracker:
         
         logger.info(f"🔍 Resolving GUIDs for {len(pending)} pending messages")
         
-        # Look for recent outgoing messages (last 5 minutes)
-        five_min_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
-        apple_time = self._datetime_to_apple_timestamp(five_min_ago)
+        # For each pending message, find the most recent outgoing message
+        # to the same phone number sent around the same time.
+        # We can't match by text because iMessage stores outgoing text in 
+        # attributed_body (binary blob), not the text column.
         
-        logger.info(f"🔎 Querying for messages since {five_min_ago} (apple_time={apple_time})")
-        
-        # First, let's debug by checking all recent outgoing messages
-        debug_query = """
-            SELECT 
-                m.guid,
-                m.text,
-                m.date,
-                m.is_from_me,
-                h.id as handle_id
-            FROM message m
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            ORDER BY m.ROWID DESC
-            LIMIT 5
-        """
-        debug_cursor = conn.execute(debug_query)
-        debug_rows = list(debug_cursor)
-        logger.info(f"🔎 Last 5 messages in chat.db:")
-        for row in debug_rows:
-            logger.info(f"   - is_from_me={row['is_from_me']}, date={row['date']}, handle={row['handle_id']}, text={row['text'][:30] if row['text'] else 'None'}...")
-        
-        query = """
-            SELECT 
-                m.guid,
-                m.text,
-                m.date,
-                m.date_delivered,
-                m.date_read,
-                h.id as handle_id
-            FROM message m
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE m.is_from_me = 1
-              AND m.date > ?
-              AND m.text IS NOT NULL
-            ORDER BY m.date DESC
-            LIMIT 50
-        """
-        cursor = conn.execute(query, (apple_time,))
-        rows = list(cursor)
-        
-        logger.info(f"📊 Found {len(rows)} recent outgoing messages in chat.db")
-        
-        for row in rows:
-            # Try to match to a pending message
-            row_phone = self._normalize_phone(row["handle_id"] or "")
-            row_text = row["text"] or ""
+        for tracked in pending:
+            if tracked.guid:  # Already resolved
+                continue
             
-            logger.debug(f"  Checking: phone={row_phone}, text={row_text[:30]}...")
+            # Find messages sent to this phone within a small window of when we sent
+            # Use 30 seconds before (in case of clock drift) to 60 seconds after
+            window_start = tracked.sent_at - timedelta(seconds=30)
+            window_end = tracked.sent_at + timedelta(seconds=60)
+            apple_start = self._datetime_to_apple_timestamp(window_start)
+            apple_end = self._datetime_to_apple_timestamp(window_end)
             
-            for tracked in pending:
-                if tracked.guid:  # Already resolved
-                    continue
+            # Normalize the phone for matching
+            tracked_phone = tracked.phone
+            # Also try without +1 prefix for matching
+            tracked_phone_digits = tracked_phone.lstrip('+')
+            if tracked_phone_digits.startswith('1') and len(tracked_phone_digits) == 11:
+                tracked_phone_short = tracked_phone_digits[1:]  # 10 digit version
+            else:
+                tracked_phone_short = tracked_phone_digits
+            
+            query = """
+                SELECT 
+                    m.guid,
+                    m.date,
+                    m.date_delivered,
+                    m.date_read,
+                    h.id as handle_id
+                FROM message m
+                LEFT JOIN handle h ON m.handle_id = h.ROWID
+                WHERE m.is_from_me = 1
+                  AND m.date >= ?
+                  AND m.date <= ?
+                ORDER BY m.date DESC
+                LIMIT 10
+            """
+            cursor = conn.execute(query, (apple_start, apple_end))
+            rows = list(cursor)
+            
+            logger.debug(f"🔎 Searching for message to {tracked.phone} sent around {tracked.sent_at}")
+            logger.debug(f"   Found {len(rows)} outgoing messages in time window")
+            
+            for row in rows:
+                row_phone = self._normalize_phone(row["handle_id"] or "")
+                row_phone_digits = row_phone.lstrip('+')
+                if row_phone_digits.startswith('1') and len(row_phone_digits) == 11:
+                    row_phone_short = row_phone_digits[1:]
+                else:
+                    row_phone_short = row_phone_digits
                 
-                # Match by phone and text
-                if row_phone == tracked.phone and row_text == tracked.text:
+                # Match by phone number (try both full and short versions)
+                if (row_phone == tracked_phone or 
+                    row_phone_short == tracked_phone_short or
+                    row_phone_digits == tracked_phone_digits):
                     tracked.guid = row["guid"]
                     logger.info(f"✅ Resolved message to {tracked.phone} -> GUID {row['guid'][:8]}...")
                     
                     # Check if already delivered/read
                     if row["date_delivered"]:
-                        logger.info(f"  (already has date_delivered)")
+                        delivered_at = self._convert_apple_timestamp(row["date_delivered"])
+                        tracked.delivered_at = delivered_at
+                        logger.info(f"   Already delivered at {delivered_at}")
                     if row["date_read"]:
-                        logger.info(f"  (already has date_read)")
+                        read_at = self._convert_apple_timestamp(row["date_read"])
+                        tracked.read_at = read_at
+                        logger.info(f"   Already read at {read_at}")
                     break
-                else:
-                    if row_phone != tracked.phone:
-                        logger.debug(f"  Phone mismatch: {row_phone} != {tracked.phone}")
-                    if row_text != tracked.text:
-                        logger.debug(f"  Text mismatch: '{row_text[:30]}' != '{tracked.text[:30]}'")
         
         # Log unresolved messages
         still_pending = [m for m in pending if not m.guid]
         if still_pending:
-            logger.info(f"⏳ Still pending resolution: {len(still_pending)} messages")
+            for msg in still_pending:
+                logger.debug(f"⏳ Unresolved: {msg.phone} sent at {msg.sent_at}")
     
     def _convert_apple_timestamp(self, apple_time: int) -> datetime:
         """Convert Apple's nanoseconds-since-2001 to datetime."""
