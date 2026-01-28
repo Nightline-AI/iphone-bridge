@@ -94,7 +94,7 @@ class StatusTracker:
             is_imessage: Whether this was sent as iMessage (SMS doesn't have receipts)
         """
         if not is_imessage:
-            logger.info(f"Not tracking SMS message to {phone} (no delivery receipts)")
+            logger.debug(f"Not tracking SMS message to {phone} (no delivery receipts)")
             return
         
         msg = TrackedMessage(
@@ -104,7 +104,7 @@ class StatusTracker:
             is_imessage=is_imessage,
         )
         self._tracked.append(msg)
-        logger.info(f"📬 Tracking message to {phone} for delivery status (text: {text[:30]}...)")
+        logger.debug(f"Tracking message to {phone} for delivery status")
     
     def _cleanup_old(self) -> None:
         """Remove messages older than the tracking window."""
@@ -225,7 +225,7 @@ class StatusTracker:
         if not pending:
             return
         
-        logger.info(f"🔍 Resolving GUIDs for {len(pending)} pending messages")
+        logger.debug(f"Resolving GUIDs for {len(pending)} pending messages")
         
         # For each pending message, find the most recent outgoing message
         # to the same phone number sent around the same time.
@@ -286,17 +286,49 @@ class StatusTracker:
                     row_phone_short == tracked_phone_short or
                     row_phone_digits == tracked_phone_digits):
                     tracked.guid = row["guid"]
-                    logger.info(f"✅ Resolved message to {tracked.phone} -> GUID {row['guid'][:8]}...")
+                    logger.debug(f"Resolved message to {tracked.phone} -> GUID {row['guid'][:8]}...")
                     
-                    # Check if already delivered/read
-                    if row["date_delivered"]:
+                    # Check if already delivered - send notification immediately
+                    if row["date_delivered"] and not tracked.delivered_at:
                         delivered_at = self._convert_apple_timestamp(row["date_delivered"])
                         tracked.delivered_at = delivered_at
-                        logger.info(f"   Already delivered at {delivered_at}")
-                    if row["date_read"]:
+                        logger.info(f"Message {tracked.guid[:8]}... delivered to {tracked.phone}")
+                        
+                        if self.on_status_change:
+                            update = StatusUpdate(
+                                guid=tracked.guid,
+                                phone=tracked.phone,
+                                status="delivered",
+                                timestamp=delivered_at,
+                                is_imessage=tracked.is_imessage,
+                            )
+                            try:
+                                await self.on_status_change(update)
+                            except Exception as e:
+                                logger.error(f"Error in status change callback: {e}")
+                    
+                    # Check if already read - send notification immediately
+                    if row["date_read"] and not tracked.read_at:
                         read_at = self._convert_apple_timestamp(row["date_read"])
                         tracked.read_at = read_at
-                        logger.info(f"   Already read at {read_at}")
+                        logger.info(f"Message {tracked.guid[:8]}... read by {tracked.phone}")
+                        
+                        if self.on_status_change:
+                            update = StatusUpdate(
+                                guid=tracked.guid,
+                                phone=tracked.phone,
+                                status="read",
+                                timestamp=read_at,
+                                is_imessage=tracked.is_imessage,
+                            )
+                            try:
+                                await self.on_status_change(update)
+                            except Exception as e:
+                                logger.error(f"Error in status change callback: {e}")
+                        
+                        # If already read, remove from tracking (final state)
+                        self._tracked = [m for m in self._tracked if m.guid != tracked.guid]
+                    
                     break
         
         # Log unresolved messages
