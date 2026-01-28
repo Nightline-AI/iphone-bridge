@@ -414,11 +414,14 @@ async def send_message(request: SendMessageRequest):
         
         # Track for delivery/read receipts (iMessage only - SMS doesn't support this)
         if _watcher and hasattr(_watcher, 'track_sent_message'):
+            logger.info(f"📬 Registering message for delivery tracking: {request.phone}")
             _watcher.track_sent_message(
                 phone=request.phone,
                 text=request.text,
                 is_imessage=True,  # Assume iMessage - will be validated by tracker
             )
+        else:
+            logger.warning(f"Cannot track message - watcher: {_watcher}, has_method: {hasattr(_watcher, 'track_sent_message') if _watcher else 'N/A'}")
         
         return SendMessageResponse(success=True, message_id=message_id)
     else:

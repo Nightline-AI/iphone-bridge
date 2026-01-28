@@ -94,7 +94,7 @@ class StatusTracker:
             is_imessage: Whether this was sent as iMessage (SMS doesn't have receipts)
         """
         if not is_imessage:
-            logger.debug(f"Not tracking SMS message to {phone} (no delivery receipts)")
+            logger.info(f"Not tracking SMS message to {phone} (no delivery receipts)")
             return
         
         msg = TrackedMessage(
@@ -104,7 +104,7 @@ class StatusTracker:
             is_imessage=is_imessage,
         )
         self._tracked.append(msg)
-        logger.debug(f"Tracking message to {phone} for delivery status")
+        logger.info(f"📬 Tracking message to {phone} for delivery status (text: {text[:30]}...)")
     
     def _cleanup_old(self) -> None:
         """Remove messages older than the tracking window."""
@@ -131,6 +131,8 @@ class StatusTracker:
         
         if not self._tracked:
             return []
+        
+        logger.debug(f"Checking status for {len(self._tracked)} tracked messages")
         
         updates: list[StatusUpdate] = []
         
@@ -223,6 +225,8 @@ class StatusTracker:
         if not pending:
             return
         
+        logger.info(f"🔍 Resolving GUIDs for {len(pending)} pending messages")
+        
         # Look for recent outgoing messages (last 5 minutes)
         five_min_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
         apple_time = self._datetime_to_apple_timestamp(five_min_ago)
@@ -232,6 +236,8 @@ class StatusTracker:
                 m.guid,
                 m.text,
                 m.date,
+                m.date_delivered,
+                m.date_read,
                 h.id as handle_id
             FROM message m
             LEFT JOIN handle h ON m.handle_id = h.ROWID
@@ -242,11 +248,16 @@ class StatusTracker:
             LIMIT 50
         """
         cursor = conn.execute(query, (apple_time,))
+        rows = list(cursor)
         
-        for row in cursor:
+        logger.info(f"📊 Found {len(rows)} recent outgoing messages in chat.db")
+        
+        for row in rows:
             # Try to match to a pending message
             row_phone = self._normalize_phone(row["handle_id"] or "")
             row_text = row["text"] or ""
+            
+            logger.debug(f"  Checking: phone={row_phone}, text={row_text[:30]}...")
             
             for tracked in pending:
                 if tracked.guid:  # Already resolved
@@ -255,8 +266,24 @@ class StatusTracker:
                 # Match by phone and text
                 if row_phone == tracked.phone and row_text == tracked.text:
                     tracked.guid = row["guid"]
-                    logger.debug(f"Resolved message to {tracked.phone} -> GUID {row['guid'][:8]}...")
+                    logger.info(f"✅ Resolved message to {tracked.phone} -> GUID {row['guid'][:8]}...")
+                    
+                    # Check if already delivered/read
+                    if row["date_delivered"]:
+                        logger.info(f"  (already has date_delivered)")
+                    if row["date_read"]:
+                        logger.info(f"  (already has date_read)")
                     break
+                else:
+                    if row_phone != tracked.phone:
+                        logger.debug(f"  Phone mismatch: {row_phone} != {tracked.phone}")
+                    if row_text != tracked.text:
+                        logger.debug(f"  Text mismatch: '{row_text[:30]}' != '{tracked.text[:30]}'")
+        
+        # Log unresolved messages
+        still_pending = [m for m in pending if not m.guid]
+        if still_pending:
+            logger.info(f"⏳ Still pending resolution: {len(still_pending)} messages")
     
     def _convert_apple_timestamp(self, apple_time: int) -> datetime:
         """Convert Apple's nanoseconds-since-2001 to datetime."""
