@@ -1,7 +1,7 @@
 """
 iPhone Bridge - Main FastAPI Application
 
-This server runs on a Mac Mini and bridges iMessage/SMS communication
+This server runs on a MacOS Device (Mac Mini) and bridges iMessage/SMS communication
 between an iPhone and the Nightline server.
 
 Run with:
