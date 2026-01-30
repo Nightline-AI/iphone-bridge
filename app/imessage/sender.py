@@ -11,6 +11,7 @@ import logging
 import shlex
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +212,114 @@ end tell
 
         return responses
 
+    def _build_send_attachment_script(self, phone: str, file_path: str) -> str:
+        """
+        Build AppleScript to send a file attachment.
+
+        Args:
+            phone: Recipient phone number
+            file_path: Full path to the file to send
+        """
+        escaped_phone = self._escape_for_applescript(phone)
+        escaped_path = self._escape_for_applescript(file_path)
+
+        # Use POSIX file to convert path to file reference
+        script = f'''
+tell application "Messages"
+    set targetService to 1st account whose service type = iMessage
+    set targetBuddy to participant "{escaped_phone}" of targetService
+    set theFile to POSIX file "{escaped_path}"
+    send theFile to targetBuddy
+end tell
+'''
+        return script.strip()
+
+    def _build_send_attachment_script_fallback(self, phone: str, file_path: str) -> str:
+        """
+        Fallback AppleScript for sending attachments on older macOS.
+        """
+        escaped_phone = self._escape_for_applescript(phone)
+        escaped_path = self._escape_for_applescript(file_path)
+
+        script = f'''
+tell application "Messages"
+    set targetService to 1st service whose service type = iMessage
+    set targetBuddy to buddy "{escaped_phone}" of targetService
+    set theFile to POSIX file "{escaped_path}"
+    send theFile to targetBuddy
+end tell
+'''
+        return script.strip()
+
+    async def send_attachment(
+        self, phone: str, file_path: str, caption: str | None = None
+    ) -> SendResponse:
+        """
+        Send a file attachment (image, video, etc.) via iMessage.
+
+        Args:
+            phone: Phone number in E.164 format (e.g., "+15551234567")
+            file_path: Full path to the file to send
+            caption: Optional text message to send with the attachment
+
+        Returns:
+            SendResponse with success status and any error message
+        """
+        if not phone:
+            return SendResponse(
+                result=SendResult.INVALID_RECIPIENT,
+                error="Phone number is required",
+            )
+
+        # Verify file exists
+        path = Path(file_path)
+        if not path.exists():
+            return SendResponse(
+                result=SendResult.FAILED,
+                error=f"File not found: {file_path}",
+            )
+
+        if not path.is_file():
+            return SendResponse(
+                result=SendResult.FAILED,
+                error=f"Path is not a file: {file_path}",
+            )
+
+        logger.info(f"Sending attachment to {phone}: {path.name}")
+
+        # Send the attachment
+        script = self._build_send_attachment_script(phone, str(path.absolute()))
+        returncode, stdout, stderr = await self._run_applescript(script)
+
+        if returncode != 0:
+            # Try fallback
+            logger.warning(f"Primary attachment send failed: {stderr}, trying fallback...")
+            script = self._build_send_attachment_script_fallback(phone, str(path.absolute()))
+            returncode, stdout, stderr = await self._run_applescript(script)
+
+        if returncode != 0:
+            error_msg = stderr or "Unknown AppleScript error"
+            logger.error(f"Failed to send attachment to {phone}: {error_msg}")
+
+            if "buddy" in error_msg.lower() or "participant" in error_msg.lower():
+                return SendResponse(
+                    result=SendResult.INVALID_RECIPIENT,
+                    error=f"Could not find recipient {phone}. Ensure they have iMessage enabled.",
+                )
+
+            return SendResponse(result=SendResult.FAILED, error=error_msg)
+
+        logger.info(f"Successfully sent attachment to {phone}: {path.name}")
+
+        # If there's a caption, send it as a separate text message
+        if caption:
+            caption_response = await self.send(phone, caption)
+            if not caption_response.success:
+                logger.warning(f"Attachment sent but caption failed: {caption_response.error}")
+                # Still return success since the attachment was sent
+
+        return SendResponse(result=SendResult.SUCCESS)
+
 
 # Convenience function for one-off sends
 async def send_imessage(phone: str, text: str) -> bool:
@@ -221,4 +330,15 @@ async def send_imessage(phone: str, text: str) -> bool:
     """
     sender = iMessageSender()
     response = await sender.send(phone, text)
+    return response.success
+
+
+async def send_imessage_attachment(phone: str, file_path: str, caption: str | None = None) -> bool:
+    """
+    Convenience function to send a single iMessage attachment.
+
+    Returns True if successful, False otherwise.
+    """
+    sender = iMessageSender()
+    response = await sender.send_attachment(phone, file_path, caption)
     return response.success

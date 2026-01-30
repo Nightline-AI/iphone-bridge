@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Awaitable, Callable, TYPE_CHECKING
 
-from app.imessage.models import IncomingMessage
+from app.imessage.models import Attachment, IncomingMessage
 
 if TYPE_CHECKING:
     from app.imessage.status_tracker import StatusTracker, StatusUpdate
@@ -128,8 +128,52 @@ class iMessageWatcher:
         # Return original if we can't normalize
         return handle_id
 
+    def _fetch_attachments_for_message(self, conn: sqlite3.Connection, message_id: int) -> list[Attachment]:
+        """Fetch all attachments for a given message ROWID."""
+        query = """
+            SELECT 
+                a.filename,
+                a.mime_type,
+                a.total_bytes,
+                a.transfer_name
+            FROM attachment a
+            INNER JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
+            WHERE maj.message_id = ?
+        """
+        cursor = conn.execute(query, (message_id,))
+        attachments = []
+        
+        for row in cursor:
+            try:
+                filename = row["filename"]
+                if not filename:
+                    continue
+                
+                # macOS stores paths with ~ prefix, expand it
+                # The path in the database is like "~/Library/Messages/Attachments/..."
+                file_path = str(Path(filename.replace("~", str(Path.home()))))
+                
+                mime_type = row["mime_type"] or "application/octet-stream"
+                size_bytes = row["total_bytes"] or 0
+                transfer_name = row["transfer_name"]
+                
+                attachments.append(
+                    Attachment(
+                        filename=Path(filename).name,
+                        path=file_path,
+                        mime_type=mime_type,
+                        size_bytes=size_bytes,
+                        transfer_name=transfer_name,
+                    )
+                )
+            except Exception as e:
+                logger.warning(f"Failed to parse attachment for message {message_id}: {e}")
+        
+        return attachments
+
     def _fetch_new_messages(self, conn: sqlite3.Connection) -> list[IncomingMessage]:
         """Fetch all messages with ROWID > last_rowid."""
+        # Include messages with attachments even if text is empty
         query = """
             SELECT 
                 m.ROWID,
@@ -138,12 +182,15 @@ class iMessageWatcher:
                 m.date,
                 m.is_from_me,
                 m.service,
+                m.cache_has_attachments,
                 h.id as handle_id
             FROM message m
             LEFT JOIN handle h ON m.handle_id = h.ROWID
             WHERE m.ROWID > ?
-              AND m.text IS NOT NULL
-              AND m.text != ''
+              AND (
+                  (m.text IS NOT NULL AND m.text != '')
+                  OR m.cache_has_attachments = 1
+              )
             ORDER BY m.ROWID ASC
             LIMIT 100
         """
@@ -157,16 +204,22 @@ class iMessageWatcher:
                 # Determine if this is iMessage vs SMS
                 service = row["service"] or ""
                 is_imessage = "iMessage" in service
+                
+                # Fetch attachments if the message has any
+                attachments = []
+                if row["cache_has_attachments"]:
+                    attachments = self._fetch_attachments_for_message(conn, row["ROWID"])
 
                 messages.append(
                     IncomingMessage(
                         rowid=row["ROWID"],
                         guid=row["guid"],
                         phone=self._normalize_phone(row["handle_id"] or "unknown"),
-                        text=row["text"],
+                        text=row["text"] or "",  # May be empty for attachment-only messages
                         received_at=received_at,
                         is_from_me=bool(row["is_from_me"]),
                         is_imessage=is_imessage,
+                        attachments=attachments,
                     )
                 )
             except Exception as e:

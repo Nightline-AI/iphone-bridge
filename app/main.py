@@ -9,9 +9,11 @@ Run with:
 """
 
 import asyncio
+import base64
 import logging
 import os
 import platform
+import tempfile
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -23,7 +25,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.imessage import IncomingMessage, iMessageSender, iMessageWatcher, MockiMessageWatcher, MockiMessageSender, StatusUpdate
-from app.webhooks import NightlineClient, SendMessageRequest, SendMessageResponse
+from app.webhooks import NightlineClient, SendAttachmentRequest, SendMessageRequest, SendMessageResponse
 from app.services.queue import MessageQueue
 
 # Configure logging
@@ -423,6 +425,66 @@ async def send_message(request: SendMessageRequest):
         return SendMessageResponse(success=True, message_id=message_id)
     else:
         return SendMessageResponse(success=False, error=response.error)
+
+
+# --- Send Attachment ---
+
+@app.post(
+    "/send-attachment",
+    response_model=SendMessageResponse,
+    dependencies=[Depends(verify_webhook_secret)],
+)
+async def send_attachment(request: SendAttachmentRequest):
+    """
+    Send an image or file attachment via iMessage.
+    
+    Requires X-Bridge-Secret header for authentication.
+    
+    The file data should be base64 encoded. For images, common formats
+    like JPEG, PNG, GIF, and HEIC are supported.
+    """
+    global _stats
+    
+    if not _sender:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Message sender not initialized",
+        )
+
+    logger.info(f"Received attachment send request: to={request.phone}, file={request.filename}")
+
+    # Decode the base64 data and write to a temp file
+    try:
+        file_data = base64.b64decode(request.data_base64)
+    except Exception as e:
+        return SendMessageResponse(success=False, error=f"Invalid base64 data: {e}")
+
+    # Create a temp file with the proper extension
+    suffix = Path(request.filename).suffix or ""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(file_data)
+        tmp_path = tmp.name
+
+    try:
+        # Send the attachment
+        response = await _sender.send_attachment(
+            phone=request.phone,
+            file_path=tmp_path,
+            caption=request.caption,
+        )
+
+        if response.success:
+            _stats["messages_sent"] += 1
+            message_id = f"bridge-{uuid.uuid4().hex[:12]}"
+            return SendMessageResponse(success=True, message_id=message_id)
+        else:
+            return SendMessageResponse(success=False, error=response.error)
+    finally:
+        # Clean up the temp file
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
 
 
 # --- Status endpoint (more details than health) ---

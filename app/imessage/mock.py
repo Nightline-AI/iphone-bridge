@@ -153,10 +153,55 @@ class MockiMessageSender:
             "phone": phone,
             "text": text,
             "sent_at": datetime.now(tz=timezone.utc).isoformat(),
+            "type": "text",
         }
         
         self._sent_messages.append(message)
         logger.info(f"🧪 Mock sent message to {phone}: {text[:50]}...")
+        
+        return SendResponse(result=SendResult.SUCCESS)
+    
+    async def send_attachment(
+        self, phone: str, file_path: str, caption: str | None = None
+    ) -> SendResponse:
+        """
+        Mock send attachment - logs the attachment instead of actually sending.
+        
+        Args:
+            phone: Phone number in E.164 format
+            file_path: Path to file to send
+            caption: Optional caption/text to send with attachment
+        
+        Returns:
+            Always returns success (unless phone is empty or file doesn't exist)
+        """
+        from pathlib import Path
+        
+        if not phone:
+            return SendResponse(
+                result=SendResult.INVALID_RECIPIENT,
+                error="Phone number is required",
+            )
+        
+        path = Path(file_path)
+        if not path.exists():
+            return SendResponse(
+                result=SendResult.FAILED,
+                error=f"File not found: {file_path}",
+            )
+        
+        message = {
+            "id": f"mock-sent-{uuid.uuid4().hex[:12]}",
+            "phone": phone,
+            "file_path": file_path,
+            "file_name": path.name,
+            "caption": caption,
+            "sent_at": datetime.now(tz=timezone.utc).isoformat(),
+            "type": "attachment",
+        }
+        
+        self._sent_messages.append(message)
+        logger.info(f"🧪 Mock sent attachment to {phone}: {path.name}")
         
         return SendResponse(result=SendResult.SUCCESS)
     

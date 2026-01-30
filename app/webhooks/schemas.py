@@ -15,6 +15,18 @@ class WebhookEvent(str, Enum):
     MESSAGE_FAILED = "message.failed"
 
 
+class AttachmentInfo(BaseModel):
+    """Information about a message attachment."""
+    
+    filename: str = Field(..., description="Original filename")
+    mime_type: str = Field(..., description="MIME type (e.g., image/jpeg)")
+    size_bytes: int = Field(..., description="File size in bytes")
+    # Note: We send the base64 encoded data separately for large files,
+    # or as a URL if the server is configured to serve attachments
+    data_base64: str | None = Field(None, description="Base64 encoded file data (for small files)")
+    url: str | None = Field(None, description="URL to download attachment (for large files)")
+
+
 class MessageReceivedEvent(BaseModel):
     """Payload sent to Nightline when a message is received."""
 
@@ -24,6 +36,7 @@ class MessageReceivedEvent(BaseModel):
     received_at: datetime = Field(..., description="When the message was received")
     message_id: str = Field(..., description="Unique message identifier (GUID)")
     is_imessage: bool = Field(True, description="True if iMessage, False if SMS")
+    attachments: list[AttachmentInfo] = Field(default_factory=list, description="List of attachments")
 
 
 class MessageStatusEvent(BaseModel):
@@ -42,6 +55,16 @@ class SendMessageRequest(BaseModel):
     phone: str = Field(..., description="Recipient phone number in E.164 format")
     text: str = Field(..., description="Message content to send")
     reply_to: str | None = Field(None, description="Optional message ID this is replying to")
+
+
+class SendAttachmentRequest(BaseModel):
+    """Request to send an attachment (from Nightline to bridge)."""
+
+    phone: str = Field(..., description="Recipient phone number in E.164 format")
+    filename: str = Field(..., description="Filename for the attachment")
+    data_base64: str = Field(..., description="Base64 encoded file data")
+    mime_type: str = Field("application/octet-stream", description="MIME type of the file")
+    caption: str | None = Field(None, description="Optional text caption to send with attachment")
 
 
 class SendMessageResponse(BaseModel):

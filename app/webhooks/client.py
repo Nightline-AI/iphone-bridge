@@ -1,18 +1,23 @@
 """HTTP client for sending webhooks to Nightline server."""
 
+import base64
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
 
 from app.config import settings
 from app.imessage.models import IncomingMessage
-from app.webhooks.schemas import MessageReceivedEvent, MessageStatusEvent
+from app.webhooks.schemas import AttachmentInfo, MessageReceivedEvent, MessageStatusEvent
 
 if TYPE_CHECKING:
     from app.imessage.status_tracker import StatusUpdate
 
 logger = logging.getLogger(__name__)
+
+# Maximum file size to embed as base64 (5MB)
+MAX_INLINE_ATTACHMENT_SIZE = 5 * 1024 * 1024
 
 
 class NightlineClient:
@@ -60,6 +65,52 @@ class NightlineClient:
             await self._client.aclose()
             self._client = None
 
+    def _encode_attachment(self, attachment) -> AttachmentInfo | None:
+        """
+        Encode an attachment for sending to Nightline.
+        
+        Args:
+            attachment: Attachment object from IncomingMessage
+            
+        Returns:
+            AttachmentInfo if successful, None if attachment can't be read
+        """
+        try:
+            path = Path(attachment.path)
+            if not path.exists():
+                logger.warning(f"Attachment file not found: {attachment.path}")
+                return None
+            
+            file_size = path.stat().st_size
+            
+            # Only encode small files inline
+            if file_size <= MAX_INLINE_ATTACHMENT_SIZE:
+                with open(path, "rb") as f:
+                    data = f.read()
+                data_base64 = base64.b64encode(data).decode("utf-8")
+                
+                return AttachmentInfo(
+                    filename=attachment.filename,
+                    mime_type=attachment.mime_type,
+                    size_bytes=attachment.size_bytes,
+                    data_base64=data_base64,
+                )
+            else:
+                # For large files, just send metadata
+                # The server can request the file separately if needed
+                logger.info(f"Attachment too large for inline encoding: {attachment.filename} ({file_size} bytes)")
+                return AttachmentInfo(
+                    filename=attachment.filename,
+                    mime_type=attachment.mime_type,
+                    size_bytes=attachment.size_bytes,
+                    data_base64=None,
+                    url=None,  # Could implement a download endpoint in the future
+                )
+                
+        except Exception as e:
+            logger.error(f"Failed to encode attachment {attachment.filename}: {e}")
+            return None
+
     async def forward_message(self, message: IncomingMessage) -> bool:
         """
         Forward an incoming message to the Nightline server.
@@ -70,12 +121,20 @@ class NightlineClient:
         Returns:
             True if successfully delivered, False otherwise
         """
+        # Encode any attachments
+        attachment_infos = []
+        for attachment in message.attachments:
+            info = self._encode_attachment(attachment)
+            if info:
+                attachment_infos.append(info)
+        
         event = MessageReceivedEvent(
             phone=message.phone,
             text=message.text,
             received_at=message.received_at,
             message_id=message.guid,
             is_imessage=message.is_imessage,
+            attachments=attachment_infos,
         )
 
         # Include client_id in the URL path
@@ -91,8 +150,9 @@ class NightlineClient:
             response = await client.post(url, json=event.model_dump(mode="json"))
 
             if response.status_code == 200:
+                attach_str = f" with {len(attachment_infos)} attachments" if attachment_infos else ""
                 logger.info(
-                    f"Forwarded message from {message.phone} to Nightline "
+                    f"Forwarded message from {message.phone} to Nightline{attach_str} "
                     f"(id={message.guid})"
                 )
                 return True
