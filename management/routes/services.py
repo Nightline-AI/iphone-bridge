@@ -19,12 +19,7 @@ SERVICES = {
 
 
 def get_tunnel_services() -> dict[str, str]:
-    """Get tunnel service labels (client-specific).
-    
-    Checks both naming patterns:
-    - New (bootstrap.sh): com.nightline.cloudflare-tunnel-bridge-{client_id}
-    - Old (setup-tunnel.sh): com.cloudflare.tunnel-{client_id}
-    """
+    """Get tunnel service labels (client-specific)."""
     from management.config import settings
     client_id = settings.nightline_client_id
     if client_id:
@@ -33,43 +28,6 @@ def get_tunnel_services() -> dict[str, str]:
             "tunnel-manage": f"com.nightline.cloudflare-tunnel-manage-{client_id}",
         }
     return {}
-
-
-def is_cloudflared_running() -> bool:
-    """Check if cloudflared process is running (regardless of launchd)."""
-    try:
-        result = subprocess.run(
-            ["pgrep", "-x", "cloudflared"],
-            capture_output=True,
-            timeout=5,
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
-
-
-def get_alternate_tunnel_status() -> bool:
-    """Check for tunnels under alternate naming patterns."""
-    from management.config import settings
-    client_id = settings.nightline_client_id
-    
-    # Check old naming pattern: com.cloudflare.tunnel-{client_id}
-    if client_id:
-        try:
-            result = subprocess.run(
-                ["launchctl", "list"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            old_pattern = f"com.cloudflare.tunnel-{client_id}"
-            if old_pattern in result.stdout:
-                return True
-        except Exception:
-            pass
-    
-    # Fallback: check if cloudflared process is running at all
-    return is_cloudflared_running()
 
 
 class ServiceStatus(BaseModel):
@@ -83,13 +41,8 @@ class ServiceAction(BaseModel):
     message: str
 
 
-def get_service_status(label: str, check_alternate: bool = False) -> bool:
-    """Check if a launchd service is running.
-    
-    Args:
-        label: The launchd service label to check
-        check_alternate: If True and service not found, check alternate tunnel patterns
-    """
+def get_service_status(label: str) -> bool:
+    """Check if a launchd service is running."""
     try:
         result = subprocess.run(
             ["launchctl", "list"],
@@ -97,14 +50,7 @@ def get_service_status(label: str, check_alternate: bool = False) -> bool:
             text=True,
             timeout=5,
         )
-        if label in result.stdout:
-            return True
-        
-        # For tunnel services, check alternate patterns if primary not found
-        if check_alternate and "tunnel" in label:
-            return get_alternate_tunnel_status()
-        
-        return False
+        return label in result.stdout
     except Exception:
         return False
 
@@ -169,7 +115,7 @@ async def list_services() -> dict[str, ServiceStatus]:
         name: ServiceStatus(
             name=name,
             label=label,
-            running=get_service_status(label, check_alternate="tunnel" in name),
+            running=get_service_status(label),
         )
         for name, label in all_services.items()
     }
@@ -191,7 +137,7 @@ async def get_service(service: str) -> ServiceStatus:
     return ServiceStatus(
         name=service,
         label=label,
-        running=get_service_status(label, check_alternate="tunnel" in service),
+        running=get_service_status(label),
     )
 
 
