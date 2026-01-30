@@ -245,6 +245,15 @@ class TunnelDiagnostics(BaseModel):
     tunnel_log_tail: str | None
 
 
+class TunnelSetupResult(BaseModel):
+    """Result of tunnel setup/reconfiguration."""
+    success: bool
+    message: str
+    bridge_tunnel: dict | None = None
+    manage_tunnel: dict | None = None
+    errors: list[str] = []
+
+
 @router.get("/diagnostics/tunnel", dependencies=[Depends(require_auth)])
 async def tunnel_diagnostics() -> TunnelDiagnostics:
     """Get detailed tunnel diagnostics for debugging."""
@@ -328,4 +337,45 @@ async def tunnel_diagnostics() -> TunnelDiagnostics:
         plist_files=plist_files,
         expected_service_names=expected,
         tunnel_log_tail=log_tail,
+    )
+
+
+@router.post("/tunnel/reconfigure", dependencies=[Depends(require_auth)])
+async def reconfigure_tunnels() -> TunnelSetupResult:
+    """
+    Manually reconfigure Cloudflare tunnels for the current client ID.
+    
+    This will:
+    1. Create tunnels if they don't exist
+    2. Update launchd services to match current client ID
+    3. Clean up any old tunnel services
+    """
+    from management.config import settings
+    from management.tunnel import setup_tunnels_for_client, get_current_tunnel_status
+    
+    client_id = settings.nightline_client_id
+    if not client_id:
+        return TunnelSetupResult(
+            success=False,
+            message="No client ID configured",
+            errors=["NIGHTLINE_CLIENT_ID not set in configuration"],
+        )
+    
+    # Check current status to find any mismatched old tunnels
+    status = get_current_tunnel_status(client_id)
+    
+    # Look for old tunnel services that might be running
+    old_client_id = None
+    for service in status.get("cloudflared_processes", []):
+        # Try to extract client ID from running processes
+        pass  # We'll let setup_tunnels_for_client handle cleanup
+    
+    result = setup_tunnels_for_client(client_id, old_client_id)
+    
+    return TunnelSetupResult(
+        success=result["success"],
+        message="Tunnels reconfigured successfully" if result["success"] else "Tunnel reconfiguration failed",
+        bridge_tunnel=result.get("bridge_tunnel"),
+        manage_tunnel=result.get("manage_tunnel"),
+        errors=result.get("errors", []),
     )

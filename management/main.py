@@ -948,6 +948,7 @@ DASHBOARD_HTML = """
                             <button class="btn" onclick="restartService('bridge')">Restart Bridge</button>
                             <button class="btn" onclick="restartService('tunnel-bridge')">Restart Tunnel</button>
                             <button class="btn" onclick="restartService('management')">Restart Management</button>
+                            <button class="btn btn-primary" onclick="reconfigureTunnels()">Reconfigure Tunnels</button>
                         </div>
                     </div>
                     <div class="action-group">
@@ -1112,6 +1113,31 @@ DASHBOARD_HTML = """
                 showToast(`Bridge: ${data.status}`, data.status === 'healthy' ? 'success' : 'error');
             } catch (e) {
                 showToast('Bridge unreachable', 'error');
+            }
+        }
+        
+        async function reconfigureTunnels() {
+            if (!confirm('Reconfigure Cloudflare tunnels for current client ID? This will create new tunnels if needed and update launchd services.')) {
+                return;
+            }
+            
+            showToast('Reconfiguring tunnels...', 'success');
+            
+            try {
+                const res = await fetch('/api/services/tunnel/reconfigure', { 
+                    method: 'POST',
+                    credentials: 'same-origin' 
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    showToast('Tunnels reconfigured successfully!', 'success');
+                    setTimeout(loadStatus, 2000);
+                } else {
+                    showToast(`Tunnel reconfiguration failed: ${data.errors.join(', ')}`, 'error');
+                }
+            } catch (e) {
+                showToast('Failed to reconfigure tunnels', 'error');
             }
         }
         
