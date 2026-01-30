@@ -52,15 +52,16 @@ def _get_attachments_dir() -> Path:
     """
     Get the attachments directory, creating it if needed.
     
-    Uses ~/Library/Application Support/NightlineBridge/attachments/
-    This is a persistent directory - files are cleaned by age, not immediately.
+    Uses ~/Pictures/NightlineBridge/ - this location is accessible to Messages.app
+    (Messages is sandboxed and may not have access to ~/Library/Application Support/)
+    Files are cleaned by age, not immediately.
     """
     global _ATTACHMENTS_DIR
     
     if _ATTACHMENTS_DIR is None:
-        # macOS standard app support location
-        app_support = Path.home() / "Library" / "Application Support" / "NightlineBridge"
-        _ATTACHMENTS_DIR = app_support / "attachments"
+        # Use ~/Pictures which Messages.app definitely has access to
+        # (Messages is sandboxed - ~/Library/Application Support/ may not be readable)
+        _ATTACHMENTS_DIR = Path.home() / "Pictures" / "NightlineBridge"
         _ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
         logger.info(f"Attachments directory: {_ATTACHMENTS_DIR}")
     
