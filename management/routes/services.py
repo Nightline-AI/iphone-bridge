@@ -232,3 +232,100 @@ async def start(service: str) -> ServiceAction:
     
     success, message = start_service(all_services[service])
     return ServiceAction(success=success, message=message)
+
+
+class TunnelDiagnostics(BaseModel):
+    """Diagnostic info for tunnel debugging."""
+    client_id: str | None
+    cloudflared_process_running: bool
+    cloudflared_pids: list[int]
+    launchctl_services: list[str]
+    plist_files: list[str]
+    expected_service_names: dict[str, str]
+    tunnel_log_tail: str | None
+
+
+@router.get("/diagnostics/tunnel", dependencies=[Depends(require_auth)])
+async def tunnel_diagnostics() -> TunnelDiagnostics:
+    """Get detailed tunnel diagnostics for debugging."""
+    from management.config import settings
+    client_id = settings.nightline_client_id
+    
+    # Check cloudflared process
+    cloudflared_pids = []
+    try:
+        result = subprocess.run(
+            ["pgrep", "-x", "cloudflared"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            cloudflared_pids = [int(p) for p in result.stdout.strip().split("\n") if p]
+    except Exception:
+        pass
+    
+    # Get all launchctl services matching our patterns
+    launchctl_services = []
+    try:
+        result = subprocess.run(
+            ["launchctl", "list"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        for line in result.stdout.split("\n"):
+            if "cloudflare" in line.lower() or "nightline" in line.lower():
+                launchctl_services.append(line.strip())
+    except Exception:
+        pass
+    
+    # List plist files
+    plist_files = []
+    launch_agents_dir = os.path.expanduser("~/Library/LaunchAgents")
+    try:
+        for f in os.listdir(launch_agents_dir):
+            if "cloudflare" in f.lower() or "nightline" in f.lower():
+                plist_files.append(f)
+    except Exception:
+        pass
+    
+    # Expected service names
+    expected = {}
+    if client_id:
+        expected = {
+            "tunnel-bridge (new)": f"com.nightline.cloudflare-tunnel-bridge-{client_id}",
+            "tunnel-manage (new)": f"com.nightline.cloudflare-tunnel-manage-{client_id}",
+            "tunnel (old)": f"com.cloudflare.tunnel-{client_id}",
+        }
+    
+    # Get tunnel log tail
+    log_tail = None
+    log_paths = [
+        "/var/log/iphone-bridge/cloudflared-stderr.log",
+        "/var/log/iphone-bridge/cloudflared-stdout.log",
+    ]
+    for log_path in log_paths:
+        try:
+            if os.path.exists(log_path):
+                result = subprocess.run(
+                    ["tail", "-30", log_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if result.stdout:
+                    log_tail = result.stdout
+                    break
+        except Exception:
+            pass
+    
+    return TunnelDiagnostics(
+        client_id=client_id,
+        cloudflared_process_running=len(cloudflared_pids) > 0,
+        cloudflared_pids=cloudflared_pids,
+        launchctl_services=launchctl_services,
+        plist_files=plist_files,
+        expected_service_names=expected,
+        tunnel_log_tail=log_tail,
+    )
