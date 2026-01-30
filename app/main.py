@@ -13,7 +13,6 @@ import base64
 import logging
 import os
 import platform
-import tempfile
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -41,6 +40,69 @@ _watcher: iMessageWatcher | None = None
 _sender: iMessageSender | None = None
 _nightline_client: NightlineClient | None = None
 _message_queue: MessageQueue | None = None
+_cleanup_task: asyncio.Task | None = None
+
+# Attachment storage directory (persistent, not temp)
+# Files are cleaned up by age, not immediately after send
+_ATTACHMENTS_DIR: Path | None = None
+_ATTACHMENT_MAX_AGE_SECONDS = 300  # 5 minutes
+
+
+def _get_attachments_dir() -> Path:
+    """
+    Get the attachments directory, creating it if needed.
+    
+    Uses ~/Library/Application Support/NightlineBridge/attachments/
+    This is a persistent directory - files are cleaned by age, not immediately.
+    """
+    global _ATTACHMENTS_DIR
+    
+    if _ATTACHMENTS_DIR is None:
+        # macOS standard app support location
+        app_support = Path.home() / "Library" / "Application Support" / "NightlineBridge"
+        _ATTACHMENTS_DIR = app_support / "attachments"
+        _ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Attachments directory: {_ATTACHMENTS_DIR}")
+    
+    return _ATTACHMENTS_DIR
+
+
+async def _attachment_cleanup_loop():
+    """
+    Background task that cleans up old attachment files.
+    
+    Runs every 60 seconds, deletes files older than 5 minutes.
+    This avoids race conditions with iMessage reading files.
+    """
+    logger.info("Attachment cleanup task started")
+    
+    while True:
+        try:
+            await asyncio.sleep(60)  # Check every minute
+            
+            attachments_dir = _get_attachments_dir()
+            now = time.time()
+            cleaned = 0
+            
+            for file_path in attachments_dir.iterdir():
+                if file_path.is_file():
+                    age = now - file_path.stat().st_mtime
+                    if age > _ATTACHMENT_MAX_AGE_SECONDS:
+                        try:
+                            file_path.unlink()
+                            cleaned += 1
+                        except Exception as e:
+                            logger.warning(f"Failed to delete old attachment {file_path}: {e}")
+            
+            if cleaned > 0:
+                logger.debug(f"Cleaned up {cleaned} old attachment files")
+                
+        except asyncio.CancelledError:
+            logger.info("Attachment cleanup task stopped")
+            break
+        except Exception as e:
+            logger.exception(f"Error in attachment cleanup: {e}")
+
 
 # Pause state
 # - pause_inbound: Won't receive/forward any messages (completely paused)
@@ -137,7 +199,7 @@ async def _handle_status_change(update: StatusUpdate):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown logic."""
-    global _start_time, _watcher, _sender, _nightline_client, _message_queue
+    global _start_time, _watcher, _sender, _nightline_client, _message_queue, _cleanup_task
 
     # Startup
     _start_time = time.time()
@@ -146,6 +208,9 @@ async def lifespan(app: FastAPI):
         logger.info("🧪 Starting iPhone Bridge in MOCK MODE (no real iMessage)")
     else:
         logger.info("Starting iPhone Bridge...")
+
+    # Initialize attachments directory
+    _get_attachments_dir()
 
     # Initialize components based on mode
     if settings.mock_mode:
@@ -168,6 +233,9 @@ async def lifespan(app: FastAPI):
     _message_queue = MessageQueue(deliver_fn=_deliver_to_nightline)
     await _message_queue.start()
 
+    # Start attachment cleanup task
+    _cleanup_task = asyncio.create_task(_attachment_cleanup_loop())
+
     # Start the message watcher
     await _watcher.start(skip_historical=not settings.process_historical)
 
@@ -187,6 +255,14 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down iPhone Bridge...")
+
+    # Stop cleanup task
+    if _cleanup_task:
+        _cleanup_task.cancel()
+        try:
+            await _cleanup_task
+        except asyncio.CancelledError:
+            pass
 
     if _message_queue:
         _message_queue.stop()
@@ -442,6 +518,9 @@ async def send_attachment(request: SendAttachmentRequest):
     
     The file data should be base64 encoded. For images, common formats
     like JPEG, PNG, GIF, and HEIC are supported.
+    
+    Files are written to a persistent directory and cleaned up by age
+    (after 5 minutes) to avoid race conditions with iMessage reading.
     """
     global _stats
     
@@ -453,38 +532,40 @@ async def send_attachment(request: SendAttachmentRequest):
 
     logger.info(f"Received attachment send request: to={request.phone}, file={request.filename}")
 
-    # Decode the base64 data and write to a temp file
+    # Decode the base64 data
     try:
         file_data = base64.b64decode(request.data_base64)
     except Exception as e:
         return SendMessageResponse(success=False, error=f"Invalid base64 data: {e}")
 
-    # Create a temp file with the proper extension
+    # Write to persistent attachments directory (cleaned up by background task)
+    # This avoids race conditions with iMessage reading the file
     suffix = Path(request.filename).suffix or ""
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(file_data)
-        tmp_path = tmp.name
+    unique_name = f"{uuid.uuid4().hex[:12]}{suffix}"
+    file_path = _get_attachments_dir() / unique_name
+    
+    file_path.write_bytes(file_data)
+    logger.debug(f"Wrote attachment to {file_path}")
 
-    try:
-        # Send the attachment
-        response = await _sender.send_attachment(
-            phone=request.phone,
-            file_path=tmp_path,
-            caption=request.caption,
-        )
+    # Send the attachment
+    response = await _sender.send_attachment(
+        phone=request.phone,
+        file_path=str(file_path),
+        caption=request.caption,
+    )
 
-        if response.success:
-            _stats["messages_sent"] += 1
-            message_id = f"bridge-{uuid.uuid4().hex[:12]}"
-            return SendMessageResponse(success=True, message_id=message_id)
-        else:
-            return SendMessageResponse(success=False, error=response.error)
-    finally:
-        # Clean up the temp file
+    if response.success:
+        _stats["messages_sent"] += 1
+        message_id = f"bridge-{uuid.uuid4().hex[:12]}"
+        # File will be cleaned up by background task after 5 minutes
+        return SendMessageResponse(success=True, message_id=message_id)
+    else:
+        # Failed to send - clean up immediately (iMessage never read it)
         try:
-            os.unlink(tmp_path)
+            file_path.unlink()
         except Exception:
             pass
+        return SendMessageResponse(success=False, error=response.error)
 
 
 # --- Status endpoint (more details than health) ---
